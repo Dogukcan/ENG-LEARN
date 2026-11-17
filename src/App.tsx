@@ -7,6 +7,7 @@ import { DinlemeScreen } from './screens/DinlemeScreen.tsx'
 import { KelimeScreen } from './screens/KelimeScreen.tsx'
 import { KonusmaScreen } from './screens/KonusmaScreen.tsx'
 import { OkumaScreen } from './screens/OkumaScreen.tsx'
+import { useRepoData } from './data/react.ts'
 
 const VALID_TAB_IDS = new Set<TabId>(TABS.map((t) => t.id))
 
@@ -26,6 +27,9 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabId>(() =>
     typeof window !== 'undefined' ? parseTabFromHash(window.location.hash) : 'bugun',
   )
+
+  // Live inbox size for the Kelime tab badge; useRepoData reloads it after every repository write.
+  const { data: inboxCount } = useRepoData((repo) => repo.inbox.list().then((items) => items.length), [])
 
   useEffect(() => {
     // Normalize the initial URL hash with replaceState so reloading keeps the tab
@@ -80,7 +84,7 @@ export function App() {
         {activeTab === 'konusma' && <KonusmaScreen />}
       </main>
 
-      <TabBar activeTab={activeTab} onSelectTab={handleSelectTab} count={0} />
+      <TabBar activeTab={activeTab} onSelectTab={handleSelectTab} count={inboxCount ?? 0} />
     </div>
   )
 }
