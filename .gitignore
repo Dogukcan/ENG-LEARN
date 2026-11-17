@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Secrets: never commit environment files (Supabase keys live here from Faz 4)
+.env
+.env.*
+!.env.example
+
+# Tool working folders
+.taste-skill/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
