@@ -166,11 +166,9 @@ describe("triage", () => {
     expect(await repo.words.listByStatus("known")).toEqual([]);
   });
 
-  it("treats a word that was already sorted as a duplicate when captured again", async () => {
+  it("still rejects a second inbox item for the same word", async () => {
     const repo = freshRepo();
-    const added = await repo.inbox.add({ word: "light", source: { kind: "diger" } });
-    if (!added.ok) throw new Error("add failed");
-    await repo.words.triage(added.item.id, "known");
+    await repo.inbox.add({ word: "light", source: { kind: "diger" } });
 
     expect(await repo.inbox.add({ word: " Light", source: { kind: "diger" } })).toEqual({
       ok: false,
@@ -190,7 +188,8 @@ describe("triage", () => {
 
     // Put a record with the same unique `normalized` key directly into `words`, so the
     // `words.put` inside `triage` fails with ConstraintError and aborts the transaction.
-    const rawDb = await openDB(name, 1);
+    // No version number: open whatever version the repository created (now 2).
+    const rawDb = await openDB(name);
     await rawDb.put("words", {
       id: "conflict-blocker",
       lemma: "CLASH",

@@ -10,7 +10,7 @@
 // - Dates are stored as ISO strings in UTC (`new Date().toISOString()`, e.g.
 //   "2026-11-17T07:30:00.000Z"). These strings sort in time order, which lets IndexedDB use
 //   them as index keys for range queries ("everything that started today").
-// - FSRS spaced-repetition card fields are NOT here yet; they arrive in Faz 2.
+// - FSRS (spaced repetition) data lives in `Card` and `ReviewLog` below, added in Faz 2.
 
 /** The four daily skill blocks. Turkish names because they are the user's own words in the UI. */
 export type SkillBlock = "okuma" | "kelime" | "dinleme" | "konusma";
@@ -49,18 +49,26 @@ export interface InboxItem {
   meaningTr?: string;
   source: CaptureSource;
   createdAt: string;
+  /**
+   * Set when this word was captured again after the user had already sorted it as "known" or
+   * "ignored". It remembers the old decision so the triage screen can say "you marked this as
+   * known before" and so the existing Word is updated instead of duplicated.
+   */
+  previousStatus?: "known" | "ignored";
 }
 
 /** What the user decided about a word during triage. */
 export type WordStatus = "learning" | "known" | "ignored";
 
-/** A sorted word. Only "learning" words will become review cards in Faz 2. */
+/** A sorted word. Only "learning" words get a review card (see `Card`). */
 export interface Word {
   id: string;
   lemma: string;
   status: WordStatus;
   meaningTr?: string;
   sentence?: string;
+  /** Other accepted spellings when typing the answer, e.g. "harbour" for "harbor". */
+  alternatives?: string[];
   source: CaptureSource;
   createdAt: string;
   updatedAt: string;
@@ -92,4 +100,92 @@ export interface Settings {
   newCardLimit: number;
   /** The book shown on the Okuma screen; null until the user picks one. */
   activeBookId: string | null;
+}
+
+// ---------- Spaced repetition (Faz 2) ----------
+
+/**
+ * ts-fsrs memory phase of a card: 0 = New (never reviewed), 1 = Learning (short steps like
+ * 1 and 10 minutes), 2 = Review (long intervals), 3 = Relearning (forgotten, short steps again).
+ * Same numbers as the `State` enum in ts-fsrs, but written here so this file stays plain types.
+ */
+export type CardState = 0 | 1 | 2 | 3;
+
+/** Coarser phase name that ts-fsrs 6 also stores on every card. */
+export type CardScheduleStatus = "new" | "learning" | "review";
+
+/**
+ * A review card: one per word. It holds the FSRS "memory state" for that word.
+ *
+ * The three numbers that describe memory:
+ * - `stability`: how many days the memory lasts. Precisely: the number of days after which the
+ *   chance of recalling the word falls from 100% to 90%. Bigger = the word is well learned.
+ * - `stabilityFast`: FSRS-7 keeps a second, short-term stability for what happens within a day
+ *   or so. It matters right after the first reviews.
+ * - `difficulty`: how hard this word is for this user (about 1 to 10). Hard words grow their
+ *   stability more slowly after each success.
+ *
+ * Dates are ISO strings at rest (UTC). They are converted to `Date` right before ts-fsrs is called.
+ */
+export interface Card {
+  /** Same value as ts-fsrs `cardId`, so the review log entries point to the same id. */
+  id: string;
+  wordId: string;
+  stability: number;
+  stabilityFast: number;
+  difficulty: number;
+  state: CardState;
+  scheduleStatus: CardScheduleStatus;
+  /** When the card should be reviewed next (ISO). Indexed as "by-due". */
+  dueAt: string;
+  /** When it was last reviewed (ISO); null while the card is new. */
+  lastReviewAt: string | null;
+  reps: number;
+  /** Length of the current interval in days (fractional). */
+  scheduledDays: number;
+  /** Position inside the (re)learning steps, e.g. 0 = first step. */
+  learningStep: number;
+  /** How many times the user forgot the word after the card had left the "new" state. */
+  lapses: number;
+  /** True once `lapses` reaches the leech threshold: a word that keeps being forgotten. */
+  leech: boolean;
+  createdAt: string;
+}
+
+/** The two grade buttons: "Unuttum" = again, "Hatırladım" = good. */
+export type ReviewGrade = "again" | "good";
+
+/** The ts-fsrs review log entry, with dates turned into ISO strings. */
+export interface FsrsRevlog {
+  /** ts-fsrs rating number: 1 Again, 2 Hard, 3 Good, 4 Easy. */
+  rating: number;
+  state: CardState;
+  scheduleStatus: CardScheduleStatus;
+  stability: number;
+  stabilityFast: number;
+  difficulty: number;
+  dueAt: string;
+  lastReviewAt: string | null;
+  reviewTime: string;
+  scheduledDays: number;
+  learningStep: number;
+}
+
+/**
+ * One answered review. Why keep a log at all?
+ * 1. Undo: `previousCard` is the exact card before the review, so it can be restored.
+ * 2. Optimisation: FSRS can later fit its own parameters to the user's real answers, which
+ *    needs the full history (when, which grade, what state).
+ * 3. Statistics: reviews per day, retention rate.
+ */
+export interface ReviewLog {
+  id: string;
+  cardId: string;
+  grade: ReviewGrade;
+  /** When the answer happened (ISO). Indexed as "by-reviewedAt". */
+  reviewedAt: string;
+  /** The values ts-fsrs recorded for this review (state BEFORE the answer, as ts-fsrs defines it). */
+  revlog: FsrsRevlog;
+  /** The card exactly as it was before this review. */
+  previousCard: Card;
 }

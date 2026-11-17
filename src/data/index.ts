@@ -13,12 +13,20 @@ export type {
   NewActivityLog,
   NewInboxItem,
   Repository,
+  ReviewQueue,
+  ReviewQueueOptions,
+  ReviewResult,
   SettingsPatch,
   TriageResult,
+  UndoResult,
 } from "./repository";
 export { DEFAULT_SETTINGS, SKILL_BLOCKS, applySettingsPatch, normalizeWord } from "./repository";
 export { localDayRange, toLocalDay, type LocalDay } from "./localDay";
 export { createIndexedDbRepository } from "./indexeddb";
+export { buildPrompt, checkAnswer, type Prompt, type PromptWord } from "./srs/prompt";
 
-/** The single app-wide repository. The database opens lazily on first use. */
-export const repository: Repository = createIndexedDbRepository();
+/**
+ * The single app-wide repository. The database opens lazily on first use. Fuzz is on in the app
+ * (intervals get a small random shift so cards do not pile up on one day) and off in tests.
+ */
+export const repository: Repository = createIndexedDbRepository("eng-learn", { enableFuzz: true });

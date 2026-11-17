@@ -15,7 +15,8 @@
     "idb": "8.0.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tailwindcss": "4.3.5"
+    "tailwindcss": "4.3.5",
+    "ts-fsrs": "6.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

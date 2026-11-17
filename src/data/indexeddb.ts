@@ -15,7 +15,14 @@
 //   This is the only place where the structure may change.
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import { localDayRange, type LocalDay } from "./localDay";
+import { localDayRange, toLocalDay, type LocalDay } from "./localDay";
+import {
+  createNewCardWith,
+  getScheduler,
+  gradeCardWith,
+  recallProbabilityWith,
+  type SchedulerOptions,
+} from "./srs/scheduler";
 import {
   DEFAULT_SETTINGS,
   SKILL_BLOCKS,
@@ -27,13 +34,33 @@ import {
   type NewActivityLog,
   type NewInboxItem,
   type Repository,
+  type ReviewQueue,
+  type ReviewQueueOptions,
+  type ReviewResult,
+  type UndoResult,
   type SettingsPatch,
   type TriageResult,
 } from "./repository";
-import type { ActivityLog, Book, InboxItem, Settings, SkillBlock, Word, WordStatus } from "./types";
+import type {
+  ActivityLog,
+  Book,
+  Card,
+  InboxItem,
+  ReviewGrade,
+  ReviewLog,
+  Settings,
+  SkillBlock,
+  Word,
+  WordStatus,
+} from "./types";
 
-/** Bump this (and add a step in `upgrade`) whenever stores or indexes change. */
-const DB_VERSION = 1;
+/**
+ * Bump this (and add a step in `upgrade`) whenever stores or indexes change.
+ * Version 2 (Faz 2) adds the `cards` and `reviewLogs` stores. A bump is needed because
+ * IndexedDB only lets code create stores inside an upgrade, and the upgrade only runs when the
+ * requested version is higher than the one saved on the device. Existing data stays untouched.
+ */
+const DB_VERSION = 2;
 
 /** Settings are a single record stored under this fixed key. */
 const SETTINGS_KEY = "app";
@@ -56,6 +83,17 @@ interface EngLearnDB extends DBSchema {
     indexes: { "by-normalized": string; "by-status": WordStatus };
   };
   activity: { key: string; value: ActivityLog; indexes: { "by-startedAt": string } };
+  cards: {
+    key: string;
+    value: Card;
+    // by-wordId is unique: one card per word, enforced by the database itself.
+    indexes: { "by-wordId": string; "by-due": string };
+  };
+  reviewLogs: {
+    key: string;
+    value: ReviewLog;
+    indexes: { "by-reviewedAt": string; "by-cardId": string };
+  };
   // Out-of-line key (no keyPath): the record is stored under SETTINGS_KEY.
   // Stored as a patch so settings added in later versions fall back to their defaults.
   settings: { key: string; value: SettingsPatch };
@@ -89,6 +127,7 @@ function toInboxItem(stored: InboxItem): InboxItem {
   };
   if (stored.sentence !== undefined) item.sentence = stored.sentence;
   if (stored.meaningTr !== undefined) item.meaningTr = stored.meaningTr;
+  if (stored.previousStatus !== undefined) item.previousStatus = stored.previousStatus;
   return item;
 }
 
@@ -103,6 +142,7 @@ function toWord(stored: StoredWord): Word {
   };
   if (stored.meaningTr !== undefined) word.meaningTr = stored.meaningTr;
   if (stored.sentence !== undefined) word.sentence = stored.sentence;
+  if (stored.alternatives !== undefined) word.alternatives = stored.alternatives;
   return word;
 }
 
@@ -117,7 +157,10 @@ function assertPositiveInteger(name: string, value: number): void {
  * The database opens lazily on first use, so creating the repository is cheap and safe at
  * import time. Tests pass a unique `dbName` so every test starts with an empty database.
  */
-export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
+export function createIndexedDbRepository(
+  dbName = "eng-learn",
+  schedulerOptions: SchedulerOptions = {},
+): Repository {
   let dbPromise: Promise<Db> | undefined;
 
   function db(): Promise<Db> {
@@ -149,7 +192,18 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
               void books.put(book);
             }
           }
-          // Future example: if (oldVersion < 2) { ...add a new store or index... }
+          if (oldVersion < 2) {
+            // Faz 2: spaced repetition. Runs for brand-new databases (0 -> 2) and for devices
+            // that still have version 1 data (1 -> 2); the v1 stores are not touched.
+            const cards = database.createObjectStore("cards", { keyPath: "id" });
+            cards.createIndex("by-wordId", "wordId", { unique: true });
+            // dueAt is an ISO string, so the index sorts by time and "due now" is a range query.
+            cards.createIndex("by-due", "dueAt");
+
+            const reviewLogs = database.createObjectStore("reviewLogs", { keyPath: "id" });
+            reviewLogs.createIndex("by-reviewedAt", "reviewedAt");
+            reviewLogs.createIndex("by-cardId", "cardId");
+          }
         },
         // If another tab or the home-screen app opens a newer DB version in a future phase,
         // close our older connection and drop the cached promise so the upgrade is not blocked.
@@ -173,27 +227,53 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
   }
 
   /**
-   * Shared by `add` and `restore`: write an inbox item unless its word already exists.
-   * The check and the write happen in ONE transaction, so two quick taps cannot both pass the
-   * check and create two items.
+   * Shared by `add` and `restore`: write an inbox item unless its word is already waiting in
+   * the inbox or is being learned. The check and the write happen in ONE transaction, so two
+   * quick taps cannot both pass the check and create two items.
+   * A word that is already "known" or "ignored" is accepted and the item remembers the old
+   * decision in `previousStatus`.
    */
   async function putInboxItemIfNew(item: InboxItem): Promise<AddInboxResult> {
     const normalized = normalizeWord(item.word);
     if (!normalized) return { ok: false, reason: "empty" };
 
     const tx = (await db()).transaction(["inbox", "words"], "readwrite");
-    const inbox = tx.objectStore("inbox");
-    const sameInInbox = await inbox.index("by-normalized").get(normalized);
-    const sameInWords = await tx.objectStore("words").index("by-normalized").count(normalized);
+    try {
+      const inbox = tx.objectStore("inbox");
+      const sameInInbox = await inbox.index("by-normalized").get(normalized);
+      const sameInWords = await tx.objectStore("words").index("by-normalized").get(normalized);
 
-    // Re-putting the very same item (same id) is allowed; that makes restore safe to repeat.
-    if ((sameInInbox && sameInInbox.id !== item.id) || sameInWords > 0) {
+      // Re-putting the very same item (same id) is allowed; that makes restore safe to repeat.
+      if (sameInInbox && sameInInbox.id !== item.id) {
+        await tx.done;
+        return { ok: false, reason: "duplicate" };
+      }
+      if (sameInWords?.status === "learning") {
+        await tx.done;
+        return { ok: false, reason: "already-learning" };
+      }
+
+      const stored: InboxItem = { ...item };
+      delete stored.previousStatus;
+      if (sameInWords) stored.previousStatus = sameInWords.status as "known" | "ignored";
+      await inbox.put({ ...stored, normalized });
       await tx.done;
-      return { ok: false, reason: "duplicate" };
+      return { ok: true, item: stored };
+    } catch (error) {
+      // A failed request aborts the transaction and makes `tx.done` reject as well. Await it
+      // here so that second rejection is not "unhandled", then rethrow the original error.
+      await tx.done.catch(() => undefined);
+      throw error;
     }
-    await inbox.put({ ...item, normalized });
-    await tx.done;
-    return { ok: true, item };
+  }
+
+  /**
+   * How many of these cards were created on the local day of `now`. The cards store is small
+   * (a few thousand at most), so reading it all is simpler than keeping a createdAt index.
+   */
+  function countCreatedOnLocalDay(cards: Card[], now: Date): number {
+    const { start, end } = localDayRange(toLocalDay(now));
+    return cards.filter((card) => card.createdAt >= start && card.createdAt < end).length;
   }
 
   /**
@@ -205,6 +285,11 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
     // [start, end): include local midnight, exclude the next local midnight.
     const range = IDBKeyRange.bound(start, end, false, true);
     return (await db()).getAllFromIndex("activity", "by-startedAt", range);
+  }
+
+  async function readSettings(): Promise<Settings> {
+    const stored = await (await db()).get("settings", SETTINGS_KEY);
+    return applySettingsPatch(DEFAULT_SETTINGS, stored ?? {});
   }
 
   return {
@@ -284,32 +369,71 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
     },
 
     words: {
-      async triage(inboxItemId: string, status: WordStatus): Promise<TriageResult> {
-        // Two stores change together, so both are in one readwrite transaction: either the
-        // word is created AND the inbox item is deleted, or (on any error) nothing changes.
-        const tx = (await db()).transaction(["inbox", "words"], "readwrite");
-        const inbox = tx.objectStore("inbox");
-        const item = await inbox.get(inboxItemId);
-        if (!item) {
-          await tx.done;
-          return { ok: false, reason: "not-found" };
-        }
+      async triage(inboxItemId: string, status: WordStatus, now = new Date()): Promise<TriageResult> {
+        // The scheduler is awaited BEFORE the transaction opens: awaiting anything that is not an
+        // IndexedDB request inside a transaction would let the browser close it early.
+        const scheduler = await getScheduler(schedulerOptions);
 
-        const now = new Date().toISOString();
-        const word: Word = {
-          id: crypto.randomUUID(),
-          lemma: item.word,
-          status,
-          source: item.source,
-          createdAt: now,
-          updatedAt: now,
-        };
-        if (item.meaningTr !== undefined) word.meaningTr = item.meaningTr;
-        if (item.sentence !== undefined) word.sentence = item.sentence;
-
+        // Several stores change together, so all are in one readwrite transaction: either the
+        // word is created, the card is created AND the inbox item is deleted, or (on any error)
+        // nothing changes.
+        const tx = (await db()).transaction(["inbox", "words", "cards", "settings"], "readwrite");
         try {
-          await tx.objectStore("words").put({ ...word, normalized: item.normalized });
+          const inbox = tx.objectStore("inbox");
+          const item = await inbox.get(inboxItemId);
+          if (!item) {
+            await tx.done;
+            return { ok: false, reason: "not-found" };
+          }
+
+          const wordsStore = tx.objectStore("words");
+          const cardsStore = tx.objectStore("cards");
+          const nowIso = now.toISOString();
+
+          // A re-captured word (previousStatus set) already has a Word record: update it
+          // instead of creating a second one, which the unique "normalized" index would refuse.
+          const existing = item.previousStatus
+            ? await wordsStore.index("by-normalized").get(item.normalized)
+            : undefined;
+
+          const word: StoredWord = existing
+            ? { ...existing, status, source: item.source, updatedAt: nowIso }
+            : {
+                id: crypto.randomUUID(),
+                lemma: item.word,
+                normalized: item.normalized,
+                status,
+                source: item.source,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              };
+          if (item.meaningTr !== undefined) word.meaningTr = item.meaningTr;
+          if (item.sentence !== undefined) word.sentence = item.sentence;
+
+          if (status === "learning") {
+            // Only "learning" words get a card, and a word keeps the card it already has.
+            const hasCard = existing
+              ? (await cardsStore.index("by-wordId").count(existing.id)) > 0
+              : false;
+            if (!hasCard) {
+              // The daily limit protects the user from a review pile they cannot keep up with.
+              const settings = applySettingsPatch(
+                DEFAULT_SETTINGS,
+                (await tx.objectStore("settings").get(SETTINGS_KEY)) ?? {},
+              );
+              const createdToday = countCreatedOnLocalDay(await cardsStore.getAll(), now);
+              if (createdToday >= settings.newCardLimit) {
+                await tx.done;
+                return { ok: false, reason: "new-card-limit" };
+              }
+              await cardsStore.put(createNewCardWith(scheduler, word.id, now));
+            }
+          }
+
+          await wordsStore.put(word);
           await inbox.delete(inboxItemId);
+          await tx.done; // resolves only after the whole transaction is committed
+          return { ok: true, word: toWord(word) };
         } catch (error) {
           // A failed request aborts the transaction (nothing is written). `tx.done` then rejects
           // too; if nobody awaits it, that is an unhandled rejection. Await it here, ignore only
@@ -317,8 +441,6 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
           await tx.done.catch(() => undefined);
           throw error;
         }
-        await tx.done; // resolves only after the whole transaction is committed
-        return { ok: true, word };
       },
 
       async listByStatus(status: WordStatus) {
@@ -326,6 +448,113 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
         return stored
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .map(toWord);
+      },
+    },
+
+    cards: {
+      async getReviewQueue(now: Date, options: ReviewQueueOptions = {}): Promise<ReviewQueue> {
+        const { maxMinutes = 15, secondsPerCard = 20 } = options;
+        const scheduler = await getScheduler(schedulerOptions);
+        const database = await db();
+
+        // by-due holds ISO strings, so "due <= now" is a range query ending at now.
+        const due = await database.getAllFromIndex(
+          "cards",
+          "by-due",
+          IDBKeyRange.upperBound(now.toISOString()),
+        );
+
+        // Sort by the chance of recalling the word, lowest first. A card at 60% is much closer
+        // to being forgotten than one at 89%, so limited session time goes to the first one.
+        // Sorting by due date alone would treat a stable card that is one day late the same as
+        // a fragile card that is one day late.
+        const ranked = due
+          .map((card) => ({ card, probability: recallProbabilityWith(scheduler, card, now) }))
+          .sort((a, b) => a.probability - b.probability);
+
+        // Cap the session so it fits the time budget (at least 1 card if anything is due).
+        const maxCards = Math.max(1, Math.floor((maxMinutes * 60) / secondsPerCard));
+        const chosen = ranked.slice(0, maxCards);
+
+        const cards: ReviewQueue["cards"] = [];
+        for (const { card } of chosen) {
+          const stored = await database.get("words", card.wordId);
+          if (stored) cards.push({ card, word: toWord(stored) });
+        }
+
+        const settings = await readSettings();
+        return {
+          cards,
+          dueTotal: due.length,
+          estimatedMinutes: (cards.length * secondsPerCard) / 60,
+          newToday: countCreatedOnLocalDay(await database.getAll("cards"), now),
+          newLimit: settings.newCardLimit,
+        };
+      },
+
+      async reviewCard(cardId: string, grade: ReviewGrade, now: Date): Promise<ReviewResult> {
+        const scheduler = await getScheduler(schedulerOptions);
+        // The card and its log are written together: a card must never move forward without
+        // its log (undo and later parameter optimisation depend on the log).
+        const tx = (await db()).transaction(["cards", "reviewLogs"], "readwrite");
+        try {
+          const previous = await tx.objectStore("cards").get(cardId);
+          if (!previous) {
+            await tx.done;
+            return { ok: false, reason: "not-found" };
+          }
+          const { card, revlog } = gradeCardWith(scheduler, previous, grade, now);
+          const log: ReviewLog = {
+            id: crypto.randomUUID(),
+            cardId,
+            grade,
+            reviewedAt: now.toISOString(),
+            revlog,
+            previousCard: previous,
+          };
+          await tx.objectStore("cards").put(card);
+          await tx.objectStore("reviewLogs").put(log);
+          await tx.done;
+          return { ok: true, card, log };
+        } catch (error) {
+          await tx.done.catch(() => undefined);
+          throw error;
+        }
+      },
+
+      async undoLastReview(): Promise<UndoResult> {
+        const tx = (await db()).transaction(["cards", "reviewLogs"], "readwrite");
+        try {
+          // Walk the time index backwards: the first entry is the newest review.
+          const cursor = await tx
+            .objectStore("reviewLogs")
+            .index("by-reviewedAt")
+            .openCursor(null, "prev");
+          if (!cursor) {
+            await tx.done;
+            return { ok: false, reason: "nothing-to-undo" };
+          }
+          const log = cursor.value;
+          // The snapshot restores everything, including lapses and the leech flag.
+          await tx.objectStore("cards").put(log.previousCard);
+          await cursor.delete();
+          await tx.done;
+          return { ok: true, card: log.previousCard };
+        } catch (error) {
+          await tx.done.catch(() => undefined);
+          throw error;
+        }
+      },
+
+      async listLeeches() {
+        const database = await db();
+        const result: Array<{ card: Card; word: Word }> = [];
+        for (const card of await database.getAll("cards")) {
+          if (!card.leech) continue;
+          const stored = await database.get("words", card.wordId);
+          if (stored) result.push({ card, word: toWord(stored) });
+        }
+        return result;
       },
     },
 
@@ -362,8 +591,7 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
 
     settings: {
       async get(): Promise<Settings> {
-        const stored = await (await db()).get("settings", SETTINGS_KEY);
-        return applySettingsPatch(DEFAULT_SETTINGS, stored ?? {});
+        return readSettings();
       },
 
       async update(patch: SettingsPatch): Promise<Settings> {

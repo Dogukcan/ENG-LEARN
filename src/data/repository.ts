@@ -18,7 +18,10 @@ import type {
   ActivitySource,
   Book,
   CaptureSource,
+  Card,
   InboxItem,
+  ReviewGrade,
+  ReviewLog,
   Settings,
   SkillBlock,
   Word,
@@ -59,15 +62,55 @@ export interface NewInboxItem {
 /**
  * Result of adding (or restoring) an inbox item.
  * - "empty": the word was blank after trimming spaces.
- * - "duplicate": the same word (ignoring case and outer spaces) is already in the inbox or
- *   in the word list, so the user does not sort the same word twice.
+ * - "duplicate": the same word (ignoring case and outer spaces) is already in the inbox, so
+ *   the user does not sort the same word twice.
+ * - "already-learning": the word is already being learned (it has a review card).
+ * A word the user earlier sorted as "known" or "ignored" is allowed again: the new inbox item
+ * carries `previousStatus`, because meeting a "known" word again may mean it is not known.
  */
 export type AddInboxResult =
   | { ok: true; item: InboxItem }
-  | { ok: false; reason: "duplicate" | "empty" };
+  | { ok: false; reason: "duplicate" | "empty" | "already-learning" };
 
-/** Result of triage. "not-found" means the inbox item no longer exists (e.g. already sorted). */
-export type TriageResult = { ok: true; word: Word } | { ok: false; reason: "not-found" };
+/**
+ * Result of triage.
+ * - "not-found": the inbox item no longer exists (e.g. already sorted).
+ * - "new-card-limit": choosing "learn" would pass `settings.newCardLimit` new cards for today.
+ *   Nothing was changed; the inbox item is still there.
+ */
+export type TriageResult =
+  | { ok: true; word: Word }
+  | { ok: false; reason: "not-found" | "new-card-limit" };
+
+/** Time budget for one review session. */
+export interface ReviewQueueOptions {
+  /** Session length cap in minutes. Default 15. */
+  maxMinutes?: number;
+  /** Estimated answer time per card in seconds. Default 20. */
+  secondsPerCard?: number;
+}
+
+export interface ReviewQueue {
+  /** Cards to review now, lowest recall probability first. */
+  cards: Array<{ card: Card; word: Word }>;
+  /** All cards that are due, also those that did not fit into the time budget. */
+  dueTotal: number;
+  /** Estimated time for the `cards` list, in minutes. */
+  estimatedMinutes: number;
+  /** Cards created today (local day). */
+  newToday: number;
+  /** The daily new card limit from the settings. */
+  newLimit: number;
+}
+
+export type ReviewResult =
+  | { ok: true; card: Card; log: ReviewLog }
+  | { ok: false; reason: "not-found" };
+
+/** Result of undo: the restored card, or "nothing-to-undo" when the log is empty. */
+export type UndoResult =
+  | { ok: true; card: Card }
+  | { ok: false; reason: "nothing-to-undo" };
 
 /** A practice session to record. The repository creates the id. */
 export interface NewActivityLog {
@@ -110,10 +153,27 @@ export interface Repository {
     /**
      * Sort an inbox item: create a Word with the given status and delete the inbox item,
      * both in one transaction, so a crash can never leave the word in both places or in neither.
+     * Choosing "learning" also creates the review card in the same transaction, unless today's
+     * new card limit is reached (then nothing changes). If the item was captured again
+     * (`previousStatus`), the existing Word is updated instead of creating a second one.
+     * `now` is a parameter so tests and callers can control the clock (default: the real time).
      */
-    triage(inboxItemId: string, status: WordStatus): Promise<TriageResult>;
+    triage(inboxItemId: string, status: WordStatus, now?: Date): Promise<TriageResult>;
     /** Words with the given status, newest first. */
     listByStatus(status: WordStatus): Promise<Word[]>;
+  };
+  cards: {
+    /**
+     * Cards that are due at `now`, the ones most likely forgotten first, cut to fit the time
+     * budget (default 15 minutes at 20 seconds per card).
+     */
+    getReviewQueue(now: Date, options?: ReviewQueueOptions): Promise<ReviewQueue>;
+    /** Record an answer: new card state and a ReviewLog are written in one transaction. */
+    reviewCard(cardId: string, grade: ReviewGrade, now: Date): Promise<ReviewResult>;
+    /** Take back the most recent review: restores the card and deletes that log entry. */
+    undoLastReview(): Promise<UndoResult>;
+    /** Cards flagged as leeches (forgotten 5 times), with their words. */
+    listLeeches(): Promise<Array<{ card: Card; word: Word }>>;
   };
   activity: {
     add(input: NewActivityLog): Promise<ActivityLog>;
