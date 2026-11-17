@@ -1,0 +1,212 @@
+/*
+ * Design tokens frozen from design/drafts/today-d.html and design/ui-freeze.md.
+ *
+ * Why tokens live in plain CSS custom properties instead of hardcoded Tailwind values:
+ * 1. A single variable name (e.g. --ground, --surface, --text) switches automatically
+ *    between light and dark themes via @media (prefers-color-scheme: dark) or data-theme
+ *    attributes without duplicating dark:... classes across every React component.
+ * 2. Both Tailwind utility classes (mapped via @theme inline in src/index.css) and inline
+ *    styles / SVG attributes can reference the exact same runtime token.
+ */
+
+:root,
+:root[data-theme="light"],
+[data-theme="light"] {
+  /* Core surfaces and text (light theme — pale turquoise ground) */
+  --ground: #e2f3f1;
+  --surface: #ffffff;
+  --raised: #f2f8fd;
+  --border: #d5e3e1;
+  --rule: #eef4f3;
+  --control: #d6d9dd;
+  --track-empty: #afb4b8;
+  --text: #1b1d1f;
+  --muted: #5c6064;
+
+  /* Semantic accents & feedback pills */
+  --accent: #1d5fd6;
+  --accent-soft: #dcf1ff;
+  --accent-ink: #0a3a80;
+  --positive: #2f7a45;
+  --negative: #c41c29;
+  --pill-positive-bg: #dcfae5;
+  --pill-positive-ink: #04250e;
+  --pill-negative-bg: #ffedea;
+  --pill-negative-ink: #831c1e;
+  --pill-neutral-bg: #eef1f4;
+  --pill-neutral-ink: #3a3d40;
+  --pill-accent-bg: #dcf1ff;
+  --pill-accent-ink: #0a3a80;
+
+  /* Radii & layout geometry */
+  --radius-card: 20px;
+  --radius-control: 10px;
+  --row-height: 72px;
+  --sidebar-width: 240px;
+  --gap: 24px;
+  --pad: 24px;
+  --control-height: 40px;
+
+  /* Typography scale (never below 12px) */
+  --fs-title: 28px;
+  --fs-section: 20px;
+  --fs-kpi: 32px;
+  --fs-body: 16px;
+  --fs-small: 14px;
+  --font: "Manrope", Inter, system-ui, -apple-system, sans-serif;
+
+  /* Block hues (light theme): Okuma amber */
+  --okuma-tile: #fff1d6;
+  --okuma-ink: #7a4a00;
+  --okuma-mark: #c27a00;
+  --okuma-tile-border: transparent;
+  --okuma-btn-bg: #7a4a00;
+  --okuma-btn-active: #573500;
+  --okuma-btn-text: #ffffff;
+
+  /* Block hues (light theme): Kelime cobalt */
+  --kelime-tile: #dcf1ff;
+  --kelime-ink: #0a3a80;
+  --kelime-mark: #1d5fd6;
+  --kelime-tile-border: transparent;
+  --kelime-btn-bg: #0a3a80;
+  --kelime-btn-active: #062554;
+  --kelime-btn-text: #ffffff;
+
+  /* Block hues (light theme): Dinleme yellow-green */
+  --dinleme-tile: #e3f5d8;
+  --dinleme-ink: #265a14;
+  --dinleme-mark: #3f8a26;
+  --dinleme-tile-border: transparent;
+  --dinleme-btn-bg: #265a14;
+  --dinleme-btn-active: #1a3f0d;
+  --dinleme-btn-text: #ffffff;
+
+  /* Block hues (light theme): Konuşma rose */
+  --konusma-tile: #ffe4ea;
+  --konusma-ink: #7d1430;
+  --konusma-mark: #c7365a;
+  --konusma-tile-border: transparent;
+  --konusma-btn-bg: #7d1430;
+  --konusma-btn-active: #590e22;
+  --konusma-btn-text: #ffffff;
+}
+
+/* System dark mode (unless explicitly forced to light via data-theme="light") */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0b1a1a;
+    --surface: #132224;
+    --raised: #192b2e;
+    --border: #223639;
+    --rule: #1c2e31;
+    --control: #35494c;
+    --track-empty: #435457;
+    --text: #f3f5f7;
+    --muted: #9ba4a6;
+    --accent: #478cf5;
+    --accent-soft: #0f2238;
+    --accent-ink: #a9d4ff;
+    --positive: #6ee794;
+    --negative: #ff8a8f;
+    --pill-positive-bg: #10291a;
+    --pill-positive-ink: #a6e6b9;
+    --pill-negative-bg: #2e1219;
+    --pill-negative-ink: #ffb3c4;
+    --pill-neutral-bg: #203336;
+    --pill-neutral-ink: #e2e5e9;
+    --pill-accent-bg: #0f2238;
+    --pill-accent-ink: #a9d4ff;
+
+    --okuma-tile: #543f18;
+    --okuma-ink: #ffd89a;
+    --okuma-mark: #e09419;
+    --okuma-tile-border: rgba(224, 148, 25, 0.4);
+    --okuma-btn-bg: #8a5400;
+    --okuma-btn-active: #6b4100;
+    --okuma-btn-text: #ffffff;
+
+    --kelime-tile: #1f4578;
+    --kelime-ink: #a9d4ff;
+    --kelime-mark: #478cf5;
+    --kelime-tile-border: rgba(71, 140, 245, 0.4);
+    --kelime-btn-bg: #1652bd;
+    --kelime-btn-active: #0f3d91;
+    --kelime-btn-text: #ffffff;
+
+    --dinleme-tile: #2a4d1e;
+    --dinleme-ink: #b4e59a;
+    --dinleme-mark: #55a638;
+    --dinleme-tile-border: rgba(85, 166, 56, 0.4);
+    --dinleme-btn-bg: #265a14;
+    --dinleme-btn-active: #1a3f0d;
+    --dinleme-btn-text: #ffffff;
+
+    --konusma-tile: #702d40;
+    --konusma-ink: #ffb3c4;
+    --konusma-mark: #e04f73;
+    --konusma-tile-border: rgba(224, 79, 115, 0.4);
+    --konusma-btn-bg: #a11b3f;
+    --konusma-btn-active: #7d1430;
+    --konusma-btn-text: #ffffff;
+  }
+}
+
+/* Explicit dark theme override via data-theme="dark" on :root or any container */
+:root[data-theme="dark"],
+[data-theme="dark"] {
+  --ground: #0b1a1a;
+  --surface: #132224;
+  --raised: #192b2e;
+  --border: #223639;
+  --rule: #1c2e31;
+  --control: #35494c;
+  --track-empty: #435457;
+  --text: #f3f5f7;
+  --muted: #9ba4a6;
+  --accent: #478cf5;
+  --accent-soft: #0f2238;
+  --accent-ink: #a9d4ff;
+  --positive: #6ee794;
+  --negative: #ff8a8f;
+  --pill-positive-bg: #10291a;
+  --pill-positive-ink: #a6e6b9;
+  --pill-negative-bg: #2e1219;
+  --pill-negative-ink: #ffb3c4;
+  --pill-neutral-bg: #203336;
+  --pill-neutral-ink: #e2e5e9;
+  --pill-accent-bg: #0f2238;
+  --pill-accent-ink: #a9d4ff;
+
+  --okuma-tile: #543f18;
+  --okuma-ink: #ffd89a;
+  --okuma-mark: #e09419;
+  --okuma-tile-border: rgba(224, 148, 25, 0.4);
+  --okuma-btn-bg: #8a5400;
+  --okuma-btn-active: #6b4100;
+  --okuma-btn-text: #ffffff;
+
+  --kelime-tile: #1f4578;
+  --kelime-ink: #a9d4ff;
+  --kelime-mark: #478cf5;
+  --kelime-tile-border: rgba(71, 140, 245, 0.4);
+  --kelime-btn-bg: #1652bd;
+  --kelime-btn-active: #0f3d91;
+  --kelime-btn-text: #ffffff;
+
+  --dinleme-tile: #2a4d1e;
+  --dinleme-ink: #b4e59a;
+  --dinleme-mark: #55a638;
+  --dinleme-tile-border: rgba(85, 166, 56, 0.4);
+  --dinleme-btn-bg: #265a14;
+  --dinleme-btn-active: #1a3f0d;
+  --dinleme-btn-text: #ffffff;
+
+  --konusma-tile: #702d40;
+  --konusma-ink: #ffb3c4;
+  --konusma-mark: #e04f73;
+  --konusma-tile-border: rgba(224, 79, 115, 0.4);
+  --konusma-btn-bg: #a11b3f;
+  --konusma-btn-active: #7d1430;
+  --konusma-btn-text: #ffffff;
+}

@@ -1,121 +1,80 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useEffect, useState } from 'react'
+import { TabBar, TABS } from './components/TabBar.tsx'
+import type { TabId } from './components/icons.tsx'
+import { BugunScreen } from './screens/BugunScreen.tsx'
+import { DinlemeScreen } from './screens/DinlemeScreen.tsx'
+import { KelimeScreen } from './screens/KelimeScreen.tsx'
+import { KonusmaScreen } from './screens/KonusmaScreen.tsx'
+import { OkumaScreen } from './screens/OkumaScreen.tsx'
 
-function App() {
-  const [count, setCount] = useState(0)
+const VALID_TAB_IDS = new Set<TabId>(TABS.map((t) => t.id))
+
+/*
+ * Parse window.location.hash (e.g. "#/okuma" or "#okuma") into a valid TabId.
+ * Falls back to "bugun" when the hash is empty or unrecognized.
+ */
+function parseTabFromHash(hash: string): TabId {
+  const cleaned = hash.replace(/^#\/?/, '').trim().toLowerCase()
+  if (VALID_TAB_IDS.has(cleaned as TabId)) {
+    return cleaned as TabId
+  }
+  return 'bugun'
+}
+
+export function App() {
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    typeof window !== 'undefined' ? parseTabFromHash(window.location.hash) : 'bugun',
+  )
+
+  useEffect(() => {
+    // Normalize the initial URL hash with replaceState so reloading keeps the tab
+    // without adding a duplicate entry to the browser history stack.
+    const canonicalHash = `#/${parseTabFromHash(window.location.hash)}`
+    if (window.location.hash !== canonicalHash) {
+      window.history.replaceState(null, '', canonicalHash)
+    }
+
+    // Listen to hashchange so browser Back/Forward buttons update React tab state.
+    const handleHashChange = () => {
+      setActiveTab(parseTabFromHash(window.location.hash))
+    }
+
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
+
+  const handleSelectTab = (nextTab: TabId) => {
+    setActiveTab(nextTab)
+    const nextHash = `#/${nextTab}`
+    // Assigning window.location.hash pushes a history entry so the browser Back button returns to the previous tab.
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash
+    }
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    /*
+     * Why h-dvh (100dvh) instead of h-screen (100vh):
+     * On iOS Safari and mobile Chrome, 100vh measures the viewport as if the address bar were hidden,
+     * which pushes bottom content under the browser chrome when the address bar is visible.
+     * 100dvh (dynamic viewport height) adapts to the actual visible viewport height.
+     */
+    <div className="flex h-dvh min-h-dvh w-full flex-col bg-ground font-sans text-body text-text">
+      {/*
+       * Scrollable screen container:
+       * Bottom padding reserves 56px for the fixed tab bar + 16px breathing room + env(safe-area-inset-bottom)
+       * so the bottom of any screen is never obscured behind the fixed navigation bar.
+       */}
+      <main className="flex-1 overflow-y-auto px-4 pt-4 pb-[calc(56px+16px+env(safe-area-inset-bottom))]">
+        {activeTab === 'bugun' && <BugunScreen />}
+        {activeTab === 'okuma' && <OkumaScreen />}
+        {activeTab === 'kelime' && <KelimeScreen />}
+        {activeTab === 'dinleme' && <DinlemeScreen />}
+        {activeTab === 'konusma' && <KonusmaScreen />}
+      </main>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      <TabBar activeTab={activeTab} onSelectTab={handleSelectTab} count={0} />
+    </div>
   )
 }
 
