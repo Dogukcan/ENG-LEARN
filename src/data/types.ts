@@ -47,6 +47,8 @@ export interface InboxItem {
   sentence?: string;
   /** Optional Turkish meaning. */
   meaningTr?: string;
+  /** Optional other accepted spellings, copied to the Word when the item is sorted. */
+  alternatives?: string[];
   source: CaptureSource;
   createdAt: string;
   /**

@@ -145,9 +145,12 @@ export function gradeCardWith(
   });
   const out = next as FsrsCardOutput;
 
-  // A lapse = forgetting a word the user had already started to learn. We count it here
-  // ourselves (not from ts-fsrs) so the rule is explicit: "again" on any card that is not new.
-  const lapses = card.lapses + (grade === "again" && card.state !== State.New ? 1 : 0);
+  // A lapse = forgetting a word that was already in long-term memory. Like Anki, we count it
+  // only when "again" is given to a card in the Review state. "Again" during the first learning
+  // steps or during relearning is not a new lapse: the word was already counted when it fell out
+  // of Review, and counting every failed retry would turn normal struggling into a "leech".
+  // We count it ourselves (not from ts-fsrs) so the rule is explicit.
+  const lapses = card.lapses + (grade === "again" && card.state === State.Review ? 1 : 0);
 
   return {
     card: {

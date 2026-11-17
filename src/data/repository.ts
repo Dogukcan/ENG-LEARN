@@ -56,6 +56,8 @@ export interface NewInboxItem {
   word: string;
   sentence?: string;
   meaningTr?: string;
+  /** Other accepted spellings, e.g. ["harbour"]. Cleaned (trimmed, lower case) on add. */
+  alternatives?: string[];
   source: CaptureSource;
 }
 
@@ -130,6 +132,11 @@ export type SettingsPatch = Partial<Omit<Settings, "blockPlanMinutes">> & {
 // ---------- The interface ----------
 
 export interface Repository {
+  /**
+   * Call `listener` after any write finished (add, triage, review, undo, settings...). Returns
+   * a function that stops the listening. Screens use it to reload when data changes anywhere.
+   */
+  subscribe(listener: () => void): () => void;
   books: {
     /** All books, sorted by short name (RW1, RW2, ...). */
     list(): Promise<Book[]>;

@@ -42,6 +42,26 @@ async function firstCard(repo: Repository, now: Date = NOW): Promise<Card> {
   return first.card;
 }
 
+/**
+ * Give Good answers (each one when the card is due) until the card is in the Review state.
+ * Returns the time of the next review, so the caller can continue from there.
+ */
+async function reachReview(
+  repo: Repository,
+  cardId: string,
+  start: Date,
+): Promise<{ card: Card; when: Date }> {
+  let when = start;
+  for (let i = 0; i < 10; i += 1) {
+    const step = await repo.cards.reviewCard(cardId, "good", when);
+    if (!step.ok) throw new Error("review failed");
+    // Next answer happens when the card is due (plus a minute, so it is surely due).
+    when = minutesAfter(new Date(step.card.dueAt), 1);
+    if (step.card.state === 2) return { card: step.card, when };
+  }
+  throw new Error("card never reached the Review state");
+}
+
 describe("database upgrade", () => {
   it("keeps books, inbox and words when a version 1 database is upgraded to version 2", async () => {
     const name = freshDbName();
@@ -378,12 +398,14 @@ describe("reviewCard", () => {
     expect(result.card.lapses).toBe(0);
   });
 
-  it("counts a lapse for Again on a card that is no longer new", async () => {
+  it("counts a lapse for Again on a card in the Review state", async () => {
     const repo = createIndexedDbRepository(freshDbName());
     await learnWord(repo, "anchor");
     const card = await firstCard(repo);
     const good = await repo.cards.reviewCard(card.id, "good", NOW);
     if (!good.ok) throw new Error("review failed");
+    // The lapse rule only applies from the Review state (2), so make sure we are there.
+    expect(good.card.state).toBe(2);
 
     const again = await repo.cards.reviewCard(card.id, "again", daysAfter(NOW, 5));
     if (!again.ok) throw new Error("review failed");
@@ -392,33 +414,58 @@ describe("reviewCard", () => {
     expect(again.card.scheduledDays).toBeLessThan(1);
   });
 
+  it("does not count Again during learning or relearning steps", async () => {
+    const repo = createIndexedDbRepository(freshDbName());
+    await learnWord(repo, "anchor");
+    const card = await firstCard(repo);
+
+    // Four Agains in a row on a card that never reached Review: all are step failures.
+    let when = NOW;
+    for (let i = 0; i < 4; i += 1) {
+      const step = await repo.cards.reviewCard(card.id, "again", when);
+      if (!step.ok) throw new Error("review failed");
+      expect(step.card.state).not.toBe(2);
+      expect(step.card.lapses).toBe(0);
+      when = minutesAfter(when, 15);
+    }
+
+    // Reach Review, forget once (lapse 1, now Relearning), then fail the relearning step twice.
+    const reached = await reachReview(repo, card.id, when);
+    when = reached.when;
+    const lapse = await repo.cards.reviewCard(card.id, "again", when);
+    if (!lapse.ok) throw new Error("review failed");
+    expect(lapse.card.state).toBe(3);
+    expect(lapse.card.lapses).toBe(1);
+    when = minutesAfter(when, 15);
+    for (let i = 0; i < 2; i += 1) {
+      const retry = await repo.cards.reviewCard(card.id, "again", when);
+      if (!retry.ok) throw new Error("review failed");
+      expect(retry.card.state).toBe(3);
+      expect(retry.card.lapses).toBe(1);
+      when = minutesAfter(when, 15);
+    }
+  });
+
   it("flags a leech at 5 lapses and lists it", async () => {
     const repo = createIndexedDbRepository(freshDbName());
     await learnWord(repo, "stubborn");
     const card = await firstCard(repo);
     expect(LEECH_THRESHOLD).toBe(5);
 
-    // The first Again leaves the "new" state without a lapse; every later Again is a lapse.
+    // Each lapse needs a trip back to Review: Good until Review, then one Again.
     let when = NOW;
     let current = card;
-    for (let i = 0; i < 4; i += 1) {
+    for (let lapse = 1; lapse <= 5; lapse += 1) {
+      const reached = await reachReview(repo, card.id, when);
+      when = reached.when;
       const step = await repo.cards.reviewCard(card.id, "again", when);
       if (!step.ok) throw new Error("review failed");
       current = step.card;
       when = minutesAfter(when, 15);
+      expect(current.lapses).toBe(lapse);
+      expect(current.leech).toBe(lapse === 5);
+      if (lapse === 4) expect(await repo.cards.listLeeches()).toEqual([]);
     }
-    expect(current.lapses).toBe(3);
-    expect(current.leech).toBe(false);
-    expect(await repo.cards.listLeeches()).toEqual([]);
-
-    for (let i = 0; i < 2; i += 1) {
-      const step = await repo.cards.reviewCard(card.id, "again", when);
-      if (!step.ok) throw new Error("review failed");
-      current = step.card;
-      when = minutesAfter(when, 15);
-    }
-    expect(current.lapses).toBe(5);
-    expect(current.leech).toBe(true);
 
     const leeches = await repo.cards.listLeeches();
     expect(leeches.map((l) => l.word.lemma)).toEqual(["stubborn"]);
@@ -453,14 +500,19 @@ describe("undoLastReview", () => {
     await learnWord(repo, "stubborn");
     const card = await firstCard(repo);
     let when = NOW;
-    let beforeLast = card;
-    for (let i = 0; i < 6; i += 1) {
+    // Four lapses (each: back to Review, then Again), then the fifth lapse sets the leech flag.
+    for (let lapse = 1; lapse <= 4; lapse += 1) {
+      when = (await reachReview(repo, card.id, when)).when;
       const step = await repo.cards.reviewCard(card.id, "again", when);
       if (!step.ok) throw new Error("review failed");
-      if (i < 5) beforeLast = step.card;
       when = minutesAfter(when, 15);
     }
+    const reached = await reachReview(repo, card.id, when);
+    const beforeLast = reached.card;
     expect(beforeLast.leech).toBe(false);
+    const last = await repo.cards.reviewCard(card.id, "again", reached.when);
+    if (!last.ok) throw new Error("review failed");
+    expect(last.card.leech).toBe(true);
     expect((await repo.cards.listLeeches()).length).toBe(1);
 
     const undone = await repo.cards.undoLastReview();

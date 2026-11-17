@@ -115,6 +115,37 @@ function cleanOptional(text: string | undefined): string | undefined {
 }
 
 /**
+ * Clean the "other spellings" list: trim, lower case, drop empties and repeats. Lower case
+ * because `checkAnswer` compares in lower case anyway. Returns undefined when nothing is left,
+ * so a word without alternatives stores no empty array.
+ */
+function cleanAlternatives(list: string[] | undefined): string[] | undefined {
+  if (!list) return undefined;
+  const cleaned = [...new Set(list.map(normalizeWord).filter((entry) => entry !== ""))];
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/**
+ * Wrap a write method so listeners hear about it AFTER the method's promise resolved, which for
+ * our methods means after the IndexedDB transaction committed. A listener that reloads data
+ * therefore always sees the new state. A write that changed nothing (an `ok: false` result, or
+ * `undefined` for "nothing found") does not notify. If the write throws, nobody is notified.
+ */
+function notifying<A extends unknown[], R>(
+  notify: () => void,
+  write: (...args: A) => Promise<R>,
+): (...args: A) => Promise<R> {
+  return async (...args: A) => {
+    const result = await write(...args);
+    const changedNothing =
+      result === undefined ||
+      (typeof result === "object" && result !== null && "ok" in result && result.ok === false);
+    if (!changedNothing) notify();
+    return result;
+  };
+}
+
+/**
  * Copy only the public InboxItem fields. Used to strip the hidden `normalized` field on the way
  * out, and to ignore any unknown extra fields a caller might pass to `restore`.
  */
@@ -127,6 +158,7 @@ function toInboxItem(stored: InboxItem): InboxItem {
   };
   if (stored.sentence !== undefined) item.sentence = stored.sentence;
   if (stored.meaningTr !== undefined) item.meaningTr = stored.meaningTr;
+  if (stored.alternatives !== undefined) item.alternatives = stored.alternatives;
   if (stored.previousStatus !== undefined) item.previousStatus = stored.previousStatus;
   return item;
 }
@@ -292,7 +324,21 @@ export function createIndexedDbRepository(
     return applySettingsPatch(DEFAULT_SETTINGS, stored ?? {});
   }
 
-  return {
+  // Screens subscribe here to learn "something was written, reload your data" (see react.ts).
+  const listeners = new Set<() => void>();
+  function notify(): void {
+    // Copy first: a listener may unsubscribe itself while we loop. One broken listener must not
+    // stop the others from hearing the news.
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch (error) {
+        console.error("Repository listener failed", error);
+      }
+    }
+  }
+
+  const base: Omit<Repository, "subscribe"> = {
     books: {
       async list() {
         const books = await (await db()).getAll("books");
@@ -350,8 +396,10 @@ export function createIndexedDbRepository(
         };
         const sentence = cleanOptional(input.sentence);
         const meaningTr = cleanOptional(input.meaningTr);
+        const alternatives = cleanAlternatives(input.alternatives);
         if (sentence !== undefined) item.sentence = sentence;
         if (meaningTr !== undefined) item.meaningTr = meaningTr;
+        if (alternatives !== undefined) item.alternatives = alternatives;
         return putInboxItemIfNew(item);
       },
 
@@ -409,6 +457,7 @@ export function createIndexedDbRepository(
               };
           if (item.meaningTr !== undefined) word.meaningTr = item.meaningTr;
           if (item.sentence !== undefined) word.sentence = item.sentence;
+          if (item.alternatives !== undefined) word.alternatives = item.alternatives;
 
           if (status === "learning") {
             // Only "learning" words get a card, and a word keeps the card it already has.
@@ -603,6 +652,37 @@ export function createIndexedDbRepository(
         await tx.done;
         return next;
       },
+    },
+  };
+
+  const wrap = <A extends unknown[], R>(write: (...args: A) => Promise<R>) =>
+    notifying(notify, write);
+
+  return {
+    books: {
+      ...base.books,
+      upsert: wrap(base.books.upsert),
+      setPosition: wrap(base.books.setPosition),
+    },
+    inbox: {
+      ...base.inbox,
+      add: wrap(base.inbox.add),
+      remove: wrap(base.inbox.remove),
+      restore: wrap(base.inbox.restore),
+    },
+    words: { ...base.words, triage: wrap(base.words.triage) },
+    cards: {
+      ...base.cards,
+      reviewCard: wrap(base.cards.reviewCard),
+      undoLastReview: wrap(base.cards.undoLastReview),
+    },
+    activity: { ...base.activity, add: wrap(base.activity.add) },
+    settings: { ...base.settings, update: wrap(base.settings.update) },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 }
