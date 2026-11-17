@@ -89,32 +89,23 @@
   --text-small: var(--fs-small);
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
 
-html {
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-  color-scheme: light dark;
-}
+  body {
+    background-color: var(--ground);
+    color: var(--text);
+    font: 400 var(--fs-body) / 1.35 var(--font);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-body {
-  margin: 0;
-  background-color: var(--ground);
-  color: var(--text);
-  font: 400 var(--fs-body) / 1.35 var(--font);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-button {
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  button {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 .num {

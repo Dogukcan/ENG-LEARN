@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { TabBar, TABS } from './components/TabBar.tsx'
+import { TabBar } from './components/TabBar.tsx'
+import { TABS } from './components/tabs.ts'
 import type { TabId } from './components/icons.tsx'
 import { BugunScreen } from './screens/BugunScreen.tsx'
 import { DinlemeScreen } from './screens/DinlemeScreen.tsx'
@@ -29,14 +30,20 @@ export function App() {
   useEffect(() => {
     // Normalize the initial URL hash with replaceState so reloading keeps the tab
     // without adding a duplicate entry to the browser history stack.
-    const canonicalHash = `#/${parseTabFromHash(window.location.hash)}`
-    if (window.location.hash !== canonicalHash) {
-      window.history.replaceState(null, '', canonicalHash)
+    const initialCanonicalHash = `#/${parseTabFromHash(window.location.hash)}`
+    if (window.location.hash !== initialCanonicalHash) {
+      window.history.replaceState(null, '', initialCanonicalHash)
     }
 
-    // Listen to hashchange so browser Back/Forward buttons update React tab state.
+    // Listen to hashchange so browser Back/Forward buttons or manual hash edits
+    // update React tab state and canonicalize invalid hashes via replaceState.
     const handleHashChange = () => {
-      setActiveTab(parseTabFromHash(window.location.hash))
+      const nextTab = parseTabFromHash(window.location.hash)
+      const canonicalHash = `#/${nextTab}`
+      if (window.location.hash !== canonicalHash) {
+        window.history.replaceState(null, '', canonicalHash)
+      }
+      setActiveTab(nextTab)
     }
 
     window.addEventListener('hashchange', handleHashChange)

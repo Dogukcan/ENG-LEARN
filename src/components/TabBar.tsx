@@ -1,20 +1,7 @@
 import { TabIcon, type TabId } from './icons.tsx'
+import { TABS } from './tabs.ts'
 
-export interface TabDefinition {
-  id: TabId
-  label: string
-  hash: `#/${TabId}`
-}
-
-export const TABS: readonly TabDefinition[] = [
-  { id: 'bugun', label: 'Bugün', hash: '#/bugun' },
-  { id: 'okuma', label: 'Okuma', hash: '#/okuma' },
-  { id: 'kelime', label: 'Kelime', hash: '#/kelime' },
-  { id: 'dinleme', label: 'Dinleme', hash: '#/dinleme' },
-  { id: 'konusma', label: 'Konuşma', hash: '#/konusma' },
-] as const
-
-export interface KelimeBadgeProps {
+interface KelimeBadgeProps {
   count: number
 }
 
@@ -22,13 +9,16 @@ export interface KelimeBadgeProps {
  * Neutral count badge on the Kelime tab icon, matching design/drafts/today-d.html (.nav-badge).
  * Hidden when count is 0 (or negative) so an empty inbox leaves the tab bar quiet.
  */
-export function KelimeBadge({ count }: KelimeBadgeProps) {
+function KelimeBadge({ count }: KelimeBadgeProps) {
   if (count <= 0) {
     return null
   }
 
   return (
-    <span className="num absolute -top-[4px] -right-[13px] inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[9px] bg-text px-[5px] text-[12px] leading-[18px] font-semibold text-ground">
+    <span
+      aria-hidden="true"
+      className="num absolute -top-[4px] -right-[13px] inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[9px] bg-text px-[5px] text-[12px] leading-[18px] font-semibold text-ground"
+    >
       {count}
     </span>
   )
@@ -57,12 +47,15 @@ export function TabBar({ activeTab, onSelectTab, count = 0 }: TabBarProps) {
     >
       {TABS.map((tab) => {
         const isActive = activeTab === tab.id
+        const ariaLabel =
+          tab.id === 'kelime' && count > 0 ? `Kelime, ${count} yeni kelime` : undefined
 
         return (
           <button
             key={tab.id}
             type="button"
             aria-current={isActive ? 'page' : undefined}
+            aria-label={ariaLabel}
             onClick={() => onSelectTab(tab.id)}
             className={`relative flex h-[56px] min-h-[44px] flex-col items-center justify-center gap-[3px] bg-transparent text-[12px] leading-[1.1] ${
               isActive ? 'font-semibold text-text' : 'font-medium text-muted'
