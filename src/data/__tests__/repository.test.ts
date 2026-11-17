@@ -1,6 +1,7 @@
 // `fake-indexeddb/auto` installs an in-memory IndexedDB on the global object, so the real
 // repository code runs in Node exactly as it would in the browser. It must be imported first.
 import "fake-indexeddb/auto";
+import { openDB } from "idb";
 import { describe, expect, it } from "vitest";
 import { createIndexedDbRepository } from "../indexeddb";
 import { DEFAULT_SETTINGS } from "../repository";
@@ -176,9 +177,69 @@ describe("triage", () => {
       reason: "duplicate",
     });
   });
+
+  it("rolls back and leaves the inbox item untouched if writing to words fails inside the transaction", async () => {
+    const name = freshDbName();
+    const repo = createIndexedDbRepository(name);
+    const added = await repo.inbox.add({
+      word: "clash",
+      sentence: "A sudden clash.",
+      source: { kind: "diger" },
+    });
+    if (!added.ok) throw new Error("add failed");
+
+    // Put a record with the same unique `normalized` key directly into `words`, so the
+    // `words.put` inside `triage` fails with ConstraintError and aborts the transaction.
+    const rawDb = await openDB(name, 1);
+    await rawDb.put("words", {
+      id: "conflict-blocker",
+      lemma: "CLASH",
+      normalized: "clash",
+      status: "ignored",
+      source: { kind: "diger" },
+      createdAt: added.item.createdAt,
+      updatedAt: added.item.createdAt,
+    });
+    rawDb.close();
+
+    await expect(repo.words.triage(added.item.id, "learning")).rejects.toThrow(/constraint/i);
+
+    // The inbox item is still there, and no learning word was written.
+    expect(await repo.inbox.list()).toEqual([added.item]);
+    expect(await repo.words.listByStatus("learning")).toEqual([]);
+    // Only the blocker record exists in `words`.
+    expect(await repo.words.listByStatus("ignored")).toHaveLength(1);
+  });
 });
 
 describe("activity", () => {
+  it("counts an activity at local 2026-11-17 01:30 for 2026-11-17 and not for 2026-11-16", async () => {
+    const repo = freshRepo();
+    // In Europe/Istanbul (UTC+3), 2026-11-17 01:30 local is 2026-11-16T22:30:00.000Z in UTC.
+    const session = await repo.activity.add({
+      block: "okuma",
+      startedAt: localIso(2026, 11, 17, 1, 30),
+      seconds: 900,
+      source: "timer",
+    });
+
+    expect(session.startedAt).toBe("2026-11-16T22:30:00.000Z");
+    expect(await repo.activity.listForDay("2026-11-17")).toEqual([session]);
+    expect(await repo.activity.listForDay("2026-11-16")).toEqual([]);
+    expect(await repo.activity.minutesPerBlockForDay("2026-11-17")).toEqual({
+      okuma: 15,
+      kelime: 0,
+      dinleme: 0,
+      konusma: 0,
+    });
+    expect(await repo.activity.minutesPerBlockForDay("2026-11-16")).toEqual({
+      okuma: 0,
+      kelime: 0,
+      dinleme: 0,
+      konusma: 0,
+    });
+  });
+
   it("sums minutes per block for one local day and ignores other days", async () => {
     const repo = freshRepo();
     const add = (block: "okuma" | "kelime" | "dinleme" | "konusma", startedAt: string, seconds: number) =>

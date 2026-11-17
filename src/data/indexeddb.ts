@@ -134,7 +134,7 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
             inbox.createIndex("by-createdAt", "createdAt");
 
             const words = database.createObjectStore("words", { keyPath: "id" });
-            words.createIndex("by-normalized", "normalized");
+            words.createIndex("by-normalized", "normalized", { unique: true });
             words.createIndex("by-status", "status");
 
             const activity = database.createObjectStore("activity", { keyPath: "id" });
@@ -150,6 +150,18 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
             }
           }
           // Future example: if (oldVersion < 2) { ...add a new store or index... }
+        },
+        // If another tab or the home-screen app opens a newer DB version in a future phase,
+        // close our older connection and drop the cached promise so the upgrade is not blocked.
+        blocking() {
+          const currentPromise = dbPromise;
+          dbPromise = undefined;
+          void currentPromise?.then((database) => database.close());
+        },
+        // If the browser abnormally closes the connection, forget the cached promise so the
+        // next call reopens the database cleanly.
+        terminated() {
+          dbPromise = undefined;
         },
       }).catch((error: unknown) => {
         // Forget the failed attempt so the next call can try again.
@@ -295,8 +307,16 @@ export function createIndexedDbRepository(dbName = "eng-learn"): Repository {
         if (item.meaningTr !== undefined) word.meaningTr = item.meaningTr;
         if (item.sentence !== undefined) word.sentence = item.sentence;
 
-        await tx.objectStore("words").put({ ...word, normalized: item.normalized });
-        await inbox.delete(inboxItemId);
+        try {
+          await tx.objectStore("words").put({ ...word, normalized: item.normalized });
+          await inbox.delete(inboxItemId);
+        } catch (error) {
+          // A failed request aborts the transaction (nothing is written). `tx.done` then rejects
+          // too; if nobody awaits it, that is an unhandled rejection. Await it here, ignore only
+          // that secondary rejection, and rethrow the original error so it is never hidden.
+          await tx.done.catch(() => undefined);
+          throw error;
+        }
         await tx.done; // resolves only after the whole transaction is committed
         return { ok: true, word };
       },
