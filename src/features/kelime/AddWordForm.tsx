@@ -111,6 +111,10 @@ export function AddWordForm({ onClose, onAdded }: AddWordFormProps) {
       setVideoLabel("");
       onAdded();
       wordRef.current?.focus();
+    } catch {
+      // Why: an unexpected storage failure used to leave the form silently doing nothing.
+      setError("Kaydedilemedi. Tekrar dene.");
+      wordRef.current?.focus();
     } finally {
       savingRef.current = false;
     }

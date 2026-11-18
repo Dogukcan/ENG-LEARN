@@ -25,8 +25,8 @@ export function ReviewRow({ queue, onStart }: ReviewRowProps) {
           onClick={onStart}
           disabled={empty}
           aria-describedby={empty ? "kelime-review-reason" : undefined}
-          // The shared primary button is 56px and full width; here it is the 44px compact version.
-          className="h-11! w-auto! shrink-0 px-4 text-small!"
+          // The shared primary button is 56px and full width; here it is the 44px compact version with the 10px control radius of the draft.
+          className="h-11! w-auto! shrink-0 rounded-control! px-4 text-small!"
         >
           Tekrara başla
         </Button>

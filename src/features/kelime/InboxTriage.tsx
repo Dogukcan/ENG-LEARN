@@ -47,6 +47,7 @@ export function InboxTriage({ inbox, queue, books, addedCount, onOpenAdd, onRelo
   const reducedMotion = useReducedMotion();
   const [processed, setProcessed] = useState(0);
   const [undo, setUndo] = useState<UndoState | null>(null);
+  const [saveError, setSaveError] = useState("");
   const busyRef = useRef(false);
   const pendingFocus = useRef<PendingFocus | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -101,6 +102,7 @@ export function InboxTriage({ inbox, queue, books, addedCount, onOpenAdd, onRelo
     if (!current || busyRef.current) return;
     if (status === "learning" && limitReached) return;
     busyRef.current = true;
+    setSaveError("");
     const item = current;
     try {
       pendingFocus.current = {
@@ -116,6 +118,10 @@ export function InboxTriage({ inbox, queue, books, addedCount, onOpenAdd, onRelo
       }
       setProcessed((count) => count + 1);
       setUndo({ item, status, addedCount });
+    } catch {
+      // Why: a rejected write must not leave a stale pendingFocus (it would steal focus on a later reload).
+      pendingFocus.current = null;
+      setSaveError("Kaydedilemedi. Tekrar dene.");
     } finally {
       busyRef.current = false;
     }
@@ -130,6 +136,7 @@ export function InboxTriage({ inbox, queue, books, addedCount, onOpenAdd, onRelo
     if (visibleUndo.status === "learning") return;
     busyRef.current = true;
     const { item, status } = visibleUndo;
+    setSaveError("");
     try {
       pendingFocus.current = {
         done: (list) => list.some((i) => i.id === item.id),
@@ -143,6 +150,9 @@ export function InboxTriage({ inbox, queue, books, addedCount, onOpenAdd, onRelo
         pendingFocus.current = null;
         onReload();
       }
+    } catch {
+      pendingFocus.current = null;
+      setSaveError("Kaydedilemedi. Tekrar dene.");
     } finally {
       busyRef.current = false;
     }
@@ -177,6 +187,7 @@ export function InboxTriage({ inbox, queue, books, addedCount, onOpenAdd, onRelo
             ) : null}
           </div>
         ) : null}
+        {saveError ? <p className="px-0.5 text-small text-muted">{saveError}</p> : null}
       </div>
 
       {current ? (
