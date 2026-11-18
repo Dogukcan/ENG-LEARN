@@ -1,33 +1,24 @@
 import { useEffect, useState } from 'react'
 import { TabBar } from './components/TabBar.tsx'
-import { TABS } from './components/tabs.ts'
+import { parseRoute, tabForRoute } from './components/tabs.ts'
+import type { RouteId } from './components/tabs.ts'
 import type { TabId } from './components/icons.tsx'
 import { BugunScreen } from './screens/BugunScreen.tsx'
 import { DinlemeScreen } from './screens/DinlemeScreen.tsx'
 import { KelimeScreen } from './screens/KelimeScreen.tsx'
+import { IstatistikScreen } from './screens/IstatistikScreen.tsx'
 import { KonusmaScreen } from './screens/KonusmaScreen.tsx'
 import { OkumaScreen } from './screens/OkumaScreen.tsx'
 import { useRepoData } from './data/react.ts'
 import { TimerProvider } from './features/timer/TimerProvider.tsx'
-
-const VALID_TAB_IDS = new Set<TabId>(TABS.map((t) => t.id))
-
-/*
- * Parse window.location.hash (e.g. "#/okuma" or "#okuma") into a valid TabId.
- * Falls back to "bugun" when the hash is empty or unrecognized.
- */
-function parseTabFromHash(hash: string): TabId {
-  const cleaned = hash.replace(/^#\/?/, '').trim().toLowerCase()
-  if (VALID_TAB_IDS.has(cleaned as TabId)) {
-    return cleaned as TabId
-  }
-  return 'bugun'
-}
+import { PwaUpdateBanner } from './pwa/PwaUpdateBanner.tsx'
 
 function AppShell() {
-  const [activeTab, setActiveTab] = useState<TabId>(() =>
-    typeof window !== 'undefined' ? parseTabFromHash(window.location.hash) : 'bugun',
+  // The route is what the hash says; the tab bar highlight is derived from it (İstatistik keeps Bugün lit).
+  const [route, setRoute] = useState<RouteId>(() =>
+    typeof window !== 'undefined' ? parseRoute(window.location.hash) : 'bugun',
   )
+  const activeTab = tabForRoute(route)
 
   // Live inbox size for the Kelime tab badge; useRepoData reloads it after every repository write.
   const { data: inboxCount } = useRepoData((repo) => repo.inbox.list().then((items) => items.length), [])
@@ -35,7 +26,7 @@ function AppShell() {
   useEffect(() => {
     // Normalize the initial URL hash with replaceState so reloading keeps the tab
     // without adding a duplicate entry to the browser history stack.
-    const initialCanonicalHash = `#/${parseTabFromHash(window.location.hash)}`
+    const initialCanonicalHash = `#/${parseRoute(window.location.hash)}`
     if (window.location.hash !== initialCanonicalHash) {
       window.history.replaceState(null, '', initialCanonicalHash)
     }
@@ -43,12 +34,12 @@ function AppShell() {
     // Listen to hashchange so browser Back/Forward buttons or manual hash edits
     // update React tab state and canonicalize invalid hashes via replaceState.
     const handleHashChange = () => {
-      const nextTab = parseTabFromHash(window.location.hash)
-      const canonicalHash = `#/${nextTab}`
+      const nextRoute = parseRoute(window.location.hash)
+      const canonicalHash = `#/${nextRoute}`
       if (window.location.hash !== canonicalHash) {
         window.history.replaceState(null, '', canonicalHash)
       }
-      setActiveTab(nextTab)
+      setRoute(nextRoute)
     }
 
     window.addEventListener('hashchange', handleHashChange)
@@ -56,7 +47,7 @@ function AppShell() {
   }, [])
 
   const handleSelectTab = (nextTab: TabId) => {
-    setActiveTab(nextTab)
+    setRoute(nextTab)
     const nextHash = `#/${nextTab}`
     // Assigning window.location.hash pushes a history entry so the browser Back button returns to the previous tab.
     if (window.location.hash !== nextHash) {
@@ -78,13 +69,15 @@ function AppShell() {
        * so the bottom of any screen is never obscured behind the fixed navigation bar.
        */}
       <main className="flex-1 overflow-y-auto px-4 pt-4 pb-[calc(56px+16px+env(safe-area-inset-bottom))]">
-        {activeTab === 'bugun' && <BugunScreen />}
+        {route === 'bugun' && <BugunScreen />}
+        {route === 'istatistik' && <IstatistikScreen />}
         {activeTab === 'okuma' && <OkumaScreen />}
         {activeTab === 'kelime' && <KelimeScreen />}
         {activeTab === 'dinleme' && <DinlemeScreen />}
         {activeTab === 'konusma' && <KonusmaScreen />}
       </main>
 
+      <PwaUpdateBanner />
       <TabBar activeTab={activeTab} onSelectTab={handleSelectTab} count={inboxCount ?? 0} />
     </div>
   )
