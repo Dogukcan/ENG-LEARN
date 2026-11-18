@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AuthResult<T = undefined> =
   | { ok: true; value: T }
-  | { ok: false; reason: "not-configured" | "invalid-email" | "error"; message: string };
+  | { ok: false; reason: "not-configured" | "invalid-email" | "invalid-code" | "error"; message: string };
 
 const NOT_CONFIGURED = {
   ok: false,
@@ -19,8 +19,13 @@ const NOT_CONFIGURED = {
 // A light check only; the real validation is done by Supabase.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** The code in the mail is 6 digits (Supabase default). Spaces are allowed: people type "123 456". */
+const CODE_PATTERN = /^\d{6}$/;
+export const normalizeCode = (value: string): string => value.replace(/\s+/g, "");
+export const isCodeShape = (value: string): boolean => CODE_PATTERN.test(normalizeCode(value));
+
 /**
- * Send a one-time sign-in link / code by email.
+ * Send a one-time sign-in code (and, as a second way, a link) by email.
  * `shouldCreateUser: false` means a stranger cannot create an account this way: only the
  * user created by hand in the dashboard can sign in.
  * `client` is a parameter (default: the real one) so tests can pass null or a fake.
@@ -38,6 +43,26 @@ export async function signInWithEmail(
     email: trimmed,
     options: { shouldCreateUser: false, emailRedirectTo: window.location.origin },
   });
+  if (error) return { ok: false, reason: "error", message: error.message };
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Finish the sign-in with the 6-digit code from the mail (type "email").
+ * Why a code and not only the link: on an iPhone the home-screen app has its own storage, separate
+ * from Safari. The link in the mail always opens in Safari, so the session would end up there and
+ * never in the app. Typing the code inside the app signs in the app itself.
+ */
+export async function verifyEmailCode(
+  email: string,
+  code: string,
+  client: SupabaseClient | null = defaultClient,
+): Promise<AuthResult> {
+  if (!client) return NOT_CONFIGURED;
+  if (!isCodeShape(code)) {
+    return { ok: false, reason: "invalid-code", message: "Kod 6 haneli olmalı." };
+  }
+  const { error } = await client.auth.verifyOtp({ email: email.trim(), token: normalizeCode(code), type: "email" });
   if (error) return { ok: false, reason: "error", message: error.message };
   return { ok: true, value: undefined };
 }

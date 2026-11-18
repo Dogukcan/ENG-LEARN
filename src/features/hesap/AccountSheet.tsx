@@ -4,10 +4,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Button, DisabledReason, Sheet, TextField, cx } from "../../components/ui";
-import { signInWithEmail, signOut } from "../auth/session";
+import { isCodeShape, signInWithEmail, signOut, verifyEmailCode } from "../auth/session";
 import { syncEngine } from "../sync/runtime";
 import { useAccount, useSyncState } from "../sync/useSync";
-import { accountDot, accountPanel, isEmailShape, relativeTimeTr, resendSecondsLeft } from "./accountView";
+import { accountDot, accountPanel, cleanCodeInput, isEmailShape, relativeTimeTr, resendSecondsLeft } from "./accountView";
 import type { DotTone } from "./accountView";
 
 const DOT_CLASS: Record<DotTone, string> = {
@@ -105,6 +105,8 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const [code, setCode] = useState("");
+  const [codeError, setCodeError] = useState("");
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   // A one-second clock only while it is needed (the resend countdown and "az önce" texts).
@@ -142,6 +144,29 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
     }
     setEmailError("");
     void send(email.trim());
+  };
+
+  const onVerify = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!isCodeShape(code)) {
+      setCodeError("6 haneli kodu yaz.");
+      return;
+    }
+    setCodeError("");
+    setMessage("");
+    setBusy(true);
+    const result = await verifyEmailCode(email, code);
+    setBusy(false);
+    // On success the auth listener flips the view to "signed in" by itself.
+    if (result.ok) setCode("");
+    else if (result.reason === "invalid-code") setCodeError("6 haneli kodu yaz.");
+    else setMessage("Kod yanlış ya da süresi dolmuş. Yeni kod iste.");
+  };
+
+  const decide = async (choice: "clear" | "keep") => {
+    setBusy(true);
+    await syncEngine.confirmUserSwitch(choice);
+    setBusy(false);
   };
 
   const doSignOut = async () => {
@@ -191,7 +216,7 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
           <>
             <div>
               <p className="text-body leading-[1.3] font-semibold">Bulut eşitleme</p>
-              <p className="mt-1 text-small leading-[1.4] text-muted">Giriş için e-postana bir bağlantı göndeririz. Şifre yok.</p>
+              <p className="mt-1 text-small leading-[1.4] text-muted">Giriş için e-postana 6 haneli bir kod göndeririz. Şifre yok.</p>
             </div>
             <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5">
               <TextField
@@ -208,7 +233,7 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
                 onChange={(event) => onEmailChange(event.target.value)}
               />
               <Button type="submit" variant="primary-block" block="kelime" disabled={busy}>
-                {busy ? "Gönderiliyor…" : "Bağlantı gönder"}
+                {busy ? "Gönderiliyor…" : "Kod gönder"}
               </Button>
             </form>
             {message ? (
@@ -223,11 +248,31 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
         {panel === "sent" ? (
           <>
             <div>
-              <p className="text-body leading-[1.3] font-semibold">Bağlantı yolda</p>
+              <p className="text-body leading-[1.3] font-semibold">Kod yolda</p>
               <p role="status" className="mt-1 text-small leading-[1.4] break-words text-muted">
-                <strong className="font-semibold text-text">{email.trim()}</strong> adresine bağlantı gönderdik. Mail uygulamanda bağlantıya dokun.
+                <strong className="font-semibold text-text">{email.trim()}</strong> adresine 6 haneli kod gönderdik. Maildeki kodu buraya yaz.
               </p>
             </div>
+            <form onSubmit={(event) => void onVerify(event)} noValidate className="flex flex-col gap-3.5">
+              <TextField
+                label="Maildeki kod"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="123456"
+                maxLength={7}
+                textSize="large"
+                className="num tracking-[0.2em]"
+                value={code}
+                error={codeError}
+                onChange={(event) => setCode(cleanCodeInput(event.target.value))}
+              />
+              <Button type="submit" variant="primary-block" block="kelime" disabled={busy}>
+                {busy ? "Kontrol ediliyor…" : "Giriş yap"}
+              </Button>
+            </form>
             <div className="grid grid-cols-2 gap-3">
               <Button
                 variant="neutral"
@@ -252,7 +297,38 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
                 {message}
               </p>
             ) : null}
-            <p className="text-small leading-[1.4] text-muted">Mail gelmediyse gereksiz klasörüne de bak.</p>
+            <p className="text-small leading-[1.4] text-muted">
+              Mail gelmediyse gereksiz klasörüne de bak. Maildeki bağlantı da çalışır ama iPhone ana ekran uygulamasında kodu kullan.
+            </p>
+          </>
+        ) : null}
+
+        {panel === "switch" ? (
+          <>
+            <span className={cx(PILL, "bg-pill-neutral-bg text-pill-neutral-ink")}>Karar bekliyor</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-small text-muted">Yeni hesap</span>
+              <span className="text-body font-semibold break-words">{account.email ?? "Giriş yapıldı"}</span>
+            </div>
+            <p className={cx(NOTICE, "bg-pill-neutral-bg text-pill-neutral-ink")}>
+              Bu cihazda başka bir hesabın verisi var. Sormadan yüklemiyoruz. Eşitleme senin cevabına kadar durur.
+            </p>
+            <Button variant="primary-block" block="kelime" disabled={busy} onClick={() => void decide("clear")}>
+              Cihazdaki veriyi sil, bu hesabınkini indir
+            </Button>
+            <p className="text-small leading-[1.4] text-muted">Silinen veri bu cihazdan geri gelmez. Önceki hesabın bulutta duran verisi yerinde kalır.</p>
+            <Button variant="neutral" disabled={busy} onClick={() => void decide("keep")}>
+              Cihazdaki veriyi bu hesaba yükle
+            </Button>
+            {message ? (
+              <p role="alert" className={cx(NOTICE, "bg-pill-negative-bg text-pill-negative-ink")}>
+                {message}
+              </p>
+            ) : null}
+            <hr className="m-0 border-0 border-t border-rule" />
+            <Button variant="neutral" disabled={busy} onClick={() => void doSignOut()}>
+              Çıkış yap
+            </Button>
           </>
         ) : null}
 
@@ -342,7 +418,7 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
                   <button
                     type="button"
                     onClick={() => void doSignOut()}
-                    className="h-14 w-full rounded-[14px] bg-negative text-body font-semibold text-white active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text dark:text-[#2e1219]"
+                    className="h-14 w-full rounded-[14px] bg-negative text-body font-semibold text-white active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text dark:text-pill-negative-bg"
                   >
                     Çıkış yap
                   </button>

@@ -5,14 +5,14 @@ import type { SyncState } from "../sync/engine";
 
 export type DotTone = "none" | "ok" | "pending" | "error";
 
-/** The seven views of hesap.html, variant 1. */
-export type AccountPanel = "off" | "out" | "sent" | "in" | "pending" | "error";
+/** The views of hesap.html, variant 1, plus "switch" (another account's data is on this device). */
+export type AccountPanel = "off" | "out" | "sent" | "in" | "pending" | "error" | "switch";
 
 export interface AccountInput {
   /** Supabase keys exist in this build. */
   configured: boolean;
   signedIn: boolean;
-  /** A sign-in link was sent from this device and the user has not come back yet. */
+  /** A sign-in code (and link) was sent from this device and the user has not come back yet. */
   linkSent: boolean;
   sync: SyncState;
 }
@@ -22,6 +22,8 @@ export const RESEND_SECONDS = 60;
 export function accountPanel(input: AccountInput): AccountPanel {
   if (!input.configured) return "off";
   if (!input.signedIn) return input.linkSent ? "sent" : "out";
+  // Another account's data is on this device: sync waits for the user's answer.
+  if (input.sync.foreignData) return "switch";
   const { status, pendingCount } = input.sync;
   if (status === "error") return "error";
   // Offline always counts as "waiting": changes stay on this device until the connection is back.
@@ -43,6 +45,8 @@ export function accountDot(input: AccountInput): { tone: DotTone; label: string 
       return { tone: "none", label: "Hesap" };
     case "error":
       return { tone: "error", label: "Hesap, eşitleme hatası" };
+    case "switch":
+      return { tone: "pending", label: "Hesap, başka hesabın verisi var" };
     case "pending":
       return {
         tone: "pending",
@@ -77,3 +81,6 @@ export function resendSecondsLeft(sentAtMs: number, nowMs: number): number {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const isEmailShape = (value: string): boolean => EMAIL_PATTERN.test(value.trim());
+
+/** Six digits only: strips everything else and cuts at 6, so a pasted "123 456" works. */
+export const cleanCodeInput = (value: string): string => value.replace(/\D/g, "").slice(0, 6);

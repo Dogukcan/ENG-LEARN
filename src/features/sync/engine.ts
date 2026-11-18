@@ -8,10 +8,12 @@
 //   1. PUSH: local rows changed since the last push -> upsert into the eng_* table.
 //   2. PULL: server rows changed since the last pull (minus a 2 s overlap) -> repo.sync.applyRemote.
 //
-// Conflicts are "last write wins" and are decided by `updated_at`, which the server stamps.
+// Conflicts are "last write wins" and are decided by `updated_at`, which the server stamps. A push
+// also carries the local edit time (`client_updated_at`); the server refuses an edit that is
+// older than the row it already holds (migration 0003), so an old copy can never win.
 
 import type { Repository, SyncRow, SyncStore } from "../../data";
-import { SYNC_ORDER, TABLES, fromRemoteRow, toRemoteRow } from "./mapping";
+import { SYNC_ORDER, TABLES, UNIQUE_COLUMNS, fromRemoteRow, toRemoteRow } from "./mapping";
 
 export type SyncStatus = "idle" | "syncing" | "offline" | "error" | "disabled";
 
@@ -23,6 +25,11 @@ export interface SyncState {
   lastSyncedAt: string | null;
   /** The reason of the last failed round, or null. */
   lastError: string | null;
+  /**
+   * True while a different account signed in on a device that still holds the previous account's
+   * data. Sync stays off until `confirmUserSwitch` is called, so nothing is uploaded unasked.
+   */
+  foreignData?: boolean;
 }
 
 // ---------- The small part of the Supabase client the engine uses ----------
@@ -31,9 +38,13 @@ export interface SyncState {
 
 interface QueryError {
   message: string;
+  /** Postgres error code, for example "23505" (unique violation). */
+  code?: string;
 }
 interface SelectQuery extends PromiseLike<{ data: Array<Record<string, unknown>> | null; error: QueryError | null }> {
   gt(column: string, value: string): SelectQuery;
+  eq(column: string, value: string): SelectQuery;
+  or(filters: string): SelectQuery;
   order(column: string, options: { ascending: boolean }): SelectQuery;
   range(from: number, to: number): SelectQuery;
 }
@@ -77,6 +88,12 @@ export interface SyncEngine {
   subscribe(listener: () => void): () => void;
   /** Sets the signed-in user (or null). Signing in starts a round; signing out stops everything. */
   setUser(userId: string | null): void;
+  /**
+   * Answer to `state.foreignData`: another account's data is on this device.
+   * "clear" deletes the local data first and then downloads this account's data;
+   * "keep" uploads the local data into this account. Nothing is uploaded before this is called.
+   */
+  confirmUserSwitch(choice: "clear" | "keep"): Promise<void>;
   /** Runs one full round now. Overlapping calls share the running round. Never throws. */
   syncNow(): Promise<void>;
   /** Attaches the automatic triggers (local changes, online, tab visible). Returns a stop function. */
@@ -89,6 +106,8 @@ const PUSH_CHUNK = 200;
 /** Pulls start a little before the last cursor so a row committed late (slow transaction) is not missed. */
 export const PULL_OVERLAP_MS = 2000;
 const KEY = "eng-learn.sync.";
+/** Postgres errors that belong to one row (unique key, missing parent), not to the whole request. */
+const ROW_ERROR_CODES = new Set(["23505", "23503"]);
 const NETWORK_ERROR = /failed to fetch|networkerror|network request failed|load failed|fetch failed/i;
 
 class SyncFailure extends Error {
@@ -150,7 +169,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
   const setState = (patch: Partial<SyncState>): void => {
     const next = { ...state, ...patch };
-    if (next.status === state.status && next.pendingCount === state.pendingCount && next.lastSyncedAt === state.lastSyncedAt && next.lastError === state.lastError) {
+    if (next.status === state.status && next.pendingCount === state.pendingCount && next.lastSyncedAt === state.lastSyncedAt && next.lastError === state.lastError && next.foreignData === state.foreignData) {
       return;
     }
     // A new object every time: useSyncExternalStore compares snapshots by reference.
@@ -159,13 +178,41 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   };
 
   /**
-   * Rows that came FROM the server in this session (id -> updatedAt). They changed locally too
-   * (applyRemote wrote them), but pushing them back would make the server bump `updated_at`,
-   * which we would pull again, and so on forever. The cursor skips old ones; this map skips the
-   * ones that arrived since.
+   * Rows whose current local version is already on the server (id -> updatedAt), per store.
+   * Two kinds of rows are in it: rows that came FROM the server (applyRemote wrote them, so they
+   * changed locally too) and rows this device just pushed. Sending either again would make the
+   * server bump `updated_at`, which we would pull again, and so on forever.
+   * It is saved in storage because a map that lives only in memory is empty after a restart; the
+   * app then pushed every row it had pulled before, over the newer edits of another device.
+   * It only needs the rows newer than the push cursor, so pushStore prunes it every round.
    */
-  const echoes = new Map<string, string>();
-  const isEcho = (store: SyncStore, row: SyncRow): boolean => echoes.get(`${store}:${row.id}`) === row.updatedAt;
+  const echoCache = new Map<SyncStore, Map<string, string>>();
+  const echoesOf = (store: SyncStore): Map<string, string> => {
+    let map = echoCache.get(store);
+    if (!map) {
+      map = new Map<string, string>();
+      try {
+        const saved = JSON.parse(read(`echo.${store}`) ?? "{}") as Record<string, unknown>;
+        for (const [id, at] of Object.entries(saved)) if (typeof at === "string") map.set(id, at);
+      } catch {
+        // A damaged value is treated as empty: the worst case is one repeated push, which the server accepts.
+      }
+      echoCache.set(store, map);
+    }
+    return map;
+  };
+  const saveEchoes = (store: SyncStore): void => {
+    write(`echo.${store}`, JSON.stringify(Object.fromEntries(echoesOf(store))));
+  };
+  const isEcho = (store: SyncStore, row: SyncRow): boolean => echoesOf(store).get(row.id) === row.updatedAt;
+  const resetCursors = (): void => {
+    for (const store of SYNC_ORDER) {
+      write(`push.${store}`, EPOCH);
+      write(`pull.${store}`, "");
+      write(`echo.${store}`, "{}");
+    }
+    echoCache.clear();
+  };
 
   const pushCursor = (store: SyncStore): string => read(`push.${store}`) ?? EPOCH;
   const pullCursor = (store: SyncStore): string | null => read(`pull.${store}`);
@@ -185,49 +232,138 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   }
 
   // ---------- One store ----------
-  async function pushStore(store: SyncStore): Promise<void> {
-    const rows = await repo.sync.listChangedSince(store, pushCursor(store));
-    if (rows.length === 0) return;
+
+  /**
+   * The server already holds a live row with the same unique key (same word, video or card word)
+   * under another id: another device added it while this one was offline. The server's row wins:
+   * it is applied locally with a time newer than the local twin, so applyRemote turns the local
+   * twin into a tombstone. Returns false when no twin was found or it could not be applied.
+   */
+  async function adoptServerTwin(store: SyncStore, row: SyncRow): Promise<boolean> {
+    const column = UNIQUE_COLUMNS[store];
+    if (!column) return false;
+    const value = toRemoteRow(store, row, userId ?? undefined)[column];
+    if (typeof value !== "string") return false;
+    const { data, error } = await client!.from(TABLES[store].table).select("*").eq(column, value);
+    if (error) throw failureFrom(error);
+    const twin = (data ?? []).find((raw) => raw.deleted_at == null && raw.id !== row.id);
+    if (!twin) return false;
+    // Strictly newer than the local twin, otherwise applyRemote would keep the local one.
+    const adoptedAt = new Date(Math.max(Date.parse(String(twin.updated_at)), Date.parse(row.updatedAt) + 1)).toISOString();
+    const result = await repo.sync.applyRemote(store, [{ ...fromRemoteRow(store, twin), updatedAt: adoptedAt }]);
+    if (result.applied === 0) return false;
+    echoesOf(store).set(String(fromRemoteRow(store, twin).id), adoptedAt);
+    return true;
+  }
+
+  /** Pushes one store. Rows the server refuses one by one are added to `problems`; the round goes on. */
+  async function pushStore(store: SyncStore, problems: string[]): Promise<void> {
+    // The time BEFORE listing: a row written while we push has a stamp >= this, so a cursor kept
+    // below it can never skip that row.
+    const listedAt = now().getTime();
+    const cursor = pushCursor(store);
+    const rows = await repo.sync.listChangedSince(store, cursor);
+    const echo = echoesOf(store);
+    // Forget rows that are no longer newer than the cursor.
+    const listed = new Set(rows.map((row) => row.id));
+    for (const id of [...echo.keys()]) if (!listed.has(id)) echo.delete(id);
+    if (rows.length === 0) {
+      saveEchoes(store);
+      return;
+    }
     const toSend = rows.filter((row) => !isEcho(store, row));
     const { table } = TABLES[store];
-    for (let start = 0; start < toSend.length; start += PUSH_CHUNK) {
-      const chunk = toSend.slice(start, start + PUSH_CHUNK).map((row) => toRemoteRow(store, row));
-      const { error } = await client!.from(table).upsert(chunk, { onConflict: "id" });
-      if (error) throw failureFrom(error);
+    const toRemote = (row: SyncRow) => toRemoteRow(store, row, userId ?? undefined);
+    let failedFloor: string | null = null;
+    const fail = (row: SyncRow, error: QueryError): void => {
+      if (failedFloor === null || row.updatedAt < failedFloor) failedFloor = row.updatedAt;
+      problems.push(error.message);
+    };
+    try {
+      for (let start = 0; start < toSend.length; start += PUSH_CHUNK) {
+        const chunk = toSend.slice(start, start + PUSH_CHUNK);
+        const { error } = await client!.from(table).upsert(chunk.map(toRemote), { onConflict: "id" });
+        if (!error) {
+          for (const row of chunk) echo.set(row.id, row.updatedAt);
+          continue;
+        }
+        // Only a unique-key or parent-row error is about single rows; anything else stops the round.
+        if (!error.code || !ROW_ERROR_CODES.has(error.code)) throw failureFrom(error);
+        // One bad row must not block the other 199: send them one at a time.
+        for (const row of chunk) {
+          const single = await client!.from(table).upsert([toRemote(row)], { onConflict: "id" });
+          if (!single.error) {
+            echo.set(row.id, row.updatedAt);
+            continue;
+          }
+          if (!single.error.code || !ROW_ERROR_CODES.has(single.error.code)) throw failureFrom(single.error);
+          // The server's twin wins; the local twin becomes a tombstone and is pushed next round.
+          if (single.error.code === "23505" && (await adoptServerTwin(store, row))) continue;
+          fail(row, single.error);
+        }
+      }
+    } finally {
+      saveEchoes(store);
     }
-    // Move the cursor only after every chunk succeeded, so a failure retries the whole store.
-    // Rows are oldest first, but take the max anyway instead of trusting the order.
-    const newest = rows.reduce((max, row) => (row.updatedAt > max ? row.updatedAt : max), pushCursor(store));
-    write(`push.${store}`, newest);
+    // Move the cursor only past rows that are settled. Never past the listing time (a row pulled
+    // from a server whose clock is ahead has a future stamp; following it would hide every new
+    // local row written before that time), and never past the first row the server refused.
+    let next = rows.reduce((max, row) => (row.updatedAt > max ? row.updatedAt : max), cursor);
+    const ceiling = new Date(listedAt - 1).toISOString();
+    if (next > ceiling) next = ceiling;
+    if (failedFloor !== null) {
+      const beforeFailed = new Date(Date.parse(failedFloor) - 1).toISOString();
+      if (beforeFailed < next) next = beforeFailed;
+    }
+    if (next > cursor) write(`push.${store}`, next);
   }
+
+  /** Postgres gives "...123456+00:00"; a filter value needs "Z" ("+" would be read as a space) and keeps the microseconds. */
+  const filterTime = (raw: unknown): string => {
+    const text = String(raw);
+    return /\+00:00$/.test(text) ? text.replace(/\+00:00$/, "Z") : new Date(text).toISOString();
+  };
 
   async function pullStore(store: SyncStore): Promise<void> {
     const last = pullCursor(store);
     const since = last ? new Date(Date.parse(last) - PULL_OVERLAP_MS).toISOString() : EPOCH;
     const { table } = TABLES[store];
+    const echo = echoesOf(store);
     let newest = last ?? "";
-    for (let from = 0; ; from += PAGE_SIZE) {
-      const { data, error } = await client!
-        .from(table)
-        .select("*")
-        .gt("updated_at", since)
-        .order("updated_at", { ascending: true })
-        .range(from, from + PAGE_SIZE - 1);
-      if (error) throw failureFrom(error);
-      const page = data ?? [];
-      if (page.length > 0) {
-        const rows = page.map((raw) => fromRemoteRow(store, raw));
-        await repo.sync.applyRemote(store, rows);
-        for (const raw of page) {
-          // Same normalisation as syncSchemas.ts: Postgres sends microseconds and "+00:00".
-          const updatedAt = new Date(String(raw.updated_at)).toISOString();
-          echoes.set(`${store}:${String(raw.id)}`, updatedAt);
-          if (updatedAt > newest) newest = updatedAt;
+    // Keyset paging: every page asks for rows AFTER the last row of the previous page, ordered by
+    // (updated_at, id). Offset paging skipped rows when the data moved between two page requests,
+    // and many rows of one push share one updated_at, so the order needs the id as a tiebreaker.
+    let after: { time: string; id: string } | null = null;
+    try {
+      for (;;) {
+        let query = client!.from(table).select("*");
+        query = after
+          ? query.or(`updated_at.gt.${after.time},and(updated_at.eq.${after.time},id.gt."${after.id.replace(/"/g, '\\"')}")`)
+          : query.gt("updated_at", since);
+        const { data, error } = await query
+          .order("updated_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(0, PAGE_SIZE - 1);
+        if (error) throw failureFrom(error);
+        const page = data ?? [];
+        if (page.length > 0) {
+          const rows = page.map((raw) => fromRemoteRow(store, raw));
+          await repo.sync.applyRemote(store, rows);
+          page.forEach((raw, index) => {
+            // Same normalisation as syncSchemas.ts: Postgres sends microseconds and "+00:00".
+            const updatedAt = new Date(String(raw.updated_at)).toISOString();
+            echo.set(String(rows[index]?.id), updatedAt);
+            if (updatedAt > newest) newest = updatedAt;
+          });
+          const lastRaw = page[page.length - 1]!;
+          after = { time: filterTime(lastRaw.updated_at), id: String(lastRaw.id) };
+          // Persist per page: a failure on page 3 keeps the progress of pages 1 and 2.
+          if (newest) write(`pull.${store}`, newest);
         }
-        // Persist per page: a failure on page 3 keeps the progress of pages 1 and 2.
-        if (newest) write(`pull.${store}`, newest);
+        if (page.length < PAGE_SIZE) break;
       }
-      if (page.length < PAGE_SIZE) break;
+    } finally {
+      saveEchoes(store);
     }
   }
 
@@ -249,13 +385,19 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     }
     setState({ status: "syncing" });
     try {
+      const problems: string[] = [];
       for (const store of SYNC_ORDER) {
-        await pushStore(store);
+        await pushStore(store, problems);
         await pullStore(store);
       }
-      const finishedAt = now().toISOString();
-      write("lastSyncedAt", finishedAt);
-      setState({ status: "idle", lastSyncedAt: finishedAt, lastError: null });
+      if (problems.length > 0) {
+        // The rest of the round went through; only these rows are waiting. They are retried each round.
+        setState({ status: "error", lastError: `${problems.length} değişiklik sunucuda çakıştı ve gönderilemedi: ${problems[0]}` });
+      } else {
+        const finishedAt = now().toISOString();
+        write("lastSyncedAt", finishedAt);
+        setState({ status: "idle", lastSyncedAt: finishedAt, lastError: null });
+      }
     } catch (caught) {
       const failure = failureFrom(caught);
       setState({ status: failure.offline ? "offline" : "error", lastError: failure.message });
@@ -311,31 +453,57 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     channel = next;
   };
 
+  /** The account that signed in while another account's data is still on this device. */
+  let switchTo: string | null = null;
+
+  function activate(next: string): void {
+    userId = next;
+    if (started) openRealtime();
+    setState({ foreignData: false });
+    // Signing in (or an app start that finds a session): sync right away.
+    void syncNow();
+  }
+
   function setUser(next: string | null): void {
     const previous = userId;
-    // Cursors belong to one account. A different account must start from the beginning,
-    // otherwise its rows older than the old cursor would never be pulled.
-    if (next !== null && next !== read("user")) {
-      if (read("user") !== null) {
-        for (const store of SYNC_ORDER) {
-          write(`push.${store}`, EPOCH);
-          write(`pull.${store}`, "");
-        }
-      }
-      write("user", next);
-    }
-    userId = next;
-    if (!client || next === null) {
+    const stored = read("user");
+    if (next === null || !client) {
+      userId = null;
+      switchTo = null;
       if (timer) clearTimeout(timer);
       timer = null;
       closeRealtime();
-      setState({ status: "disabled", pendingCount: 0 });
+      setState({ status: "disabled", pendingCount: 0, foreignData: false });
       return;
     }
+    if (stored !== null && stored !== next) {
+      // The local data and the cursors belong to another account. Uploading it unasked would put
+      // that account's words and reports into this one, so wait for the user's answer.
+      userId = null;
+      switchTo = next;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      closeRealtime();
+      setState({ status: "disabled", pendingCount: 0, foreignData: true });
+      return;
+    }
+    switchTo = null;
+    if (stored === null) write("user", next);
     if (previous === next) return;
-    if (started) openRealtime();
-    // Signing in (or an app start that finds a session): sync right away.
-    void syncNow();
+    activate(next);
+  }
+
+  async function confirmUserSwitch(choice: "clear" | "keep"): Promise<void> {
+    const next = switchTo;
+    if (next === null || !client) return;
+    switchTo = null;
+    if (choice === "clear") await repo.sync.clearLocalData();
+    // Cursors belong to one account: the new account starts from the beginning, otherwise its
+    // rows older than the old cursor would never be pulled.
+    resetCursors();
+    write("user", next);
+    activate(next);
+    await syncNow();
   }
 
   function start(): () => void {
@@ -380,6 +548,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       return () => listeners.delete(listener);
     },
     setUser,
+    confirmUserSwitch,
     syncNow,
     start,
   };

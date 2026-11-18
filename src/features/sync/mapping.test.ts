@@ -57,6 +57,18 @@ describe("toRemoteRow", () => {
     expect(out.deleted_at).toBe("2026-11-17T08:00:00.000Z");
   });
 
+  it("sends the local edit time as client_updated_at (the server only compares it, it is not the row time)", () => {
+    expect(toRemoteRow("inbox", inbox)).toMatchObject({ client_updated_at: inbox.updatedAt });
+    expect(toRemoteRow("inbox", inbox)).not.toHaveProperty("updated_at");
+  });
+
+  it("uses the account's user id as the settings id, so two accounts never share a primary key", () => {
+    expect(toRemoteRow("settings", { id: "app", updatedAt: "u" }, "user-1").id).toBe("user-1");
+    expect(toRemoteRow("settings", { id: "app", updatedAt: "u" }, "user-2").id).toBe("user-2");
+    // Other stores keep their own id.
+    expect(toRemoteRow("books", { id: "b1", title: "t", shortName: "RW1", unit: 1, page: 1, updatedAt: "u" }, "user-1").id).toBe("b1");
+  });
+
   it("leaves a missing required settings field out so the column default applies", () => {
     const out = toRemoteRow("settings", { id: "app", updatedAt: "u", newCardLimit: 12 });
     expect(out).toMatchObject({ id: "app", new_card_limit: 12, active_book_id: null });
@@ -65,6 +77,10 @@ describe("toRemoteRow", () => {
 });
 
 describe("fromRemoteRow", () => {
+  it("maps the settings row of an account back to the local id \"app\"", () => {
+    expect(fromRemoteRow("settings", { id: "user-1", updated_at: "2026-11-17T07:00:00+00:00", deleted_at: null }).id).toBe("app");
+  });
+
   it("returns camelCase fields, drops user_id and keeps jsonb contents untouched", () => {
     const out = fromRemoteRow("speakingSessions", {
       id: "s1",

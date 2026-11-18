@@ -101,6 +101,25 @@ export const SYNC_ORDER: readonly SyncStore[] = [
   "speakingErrors",
 ];
 
+/**
+ * The column behind each partial unique index on the server (see the migrations). A push that
+ * hits one of them (Postgres error 23505) means another device already holds the same word,
+ * video or card under a different id; the engine looks that twin up by this column.
+ */
+export const UNIQUE_COLUMNS: Partial<Record<SyncStore, string>> = {
+  inbox: "normalized",
+  words: "normalized",
+  cards: "word_id",
+  videos: "youtube_id",
+};
+
+/**
+ * The local settings record always has the id "app" (one record per device). On the server the
+ * id is the primary key of the whole table, so the same "app" from a second account would collide
+ * with the first account's row. The remote id is therefore the account's own user id.
+ */
+export const LOCAL_SETTINGS_ID = "app";
+
 export function camelToSnake(name: string): string {
   return name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
@@ -114,10 +133,14 @@ function snakeToCamel(name: string): string {
  * `updated_at` is deliberately NOT sent: the database trigger stamps it with the server clock,
  * so a device with a wrong clock cannot make its old edit win. `user_id` is not sent either: the
  * column default is auth.uid().
+ * `client_updated_at` is the local time of the edit. It is NOT used as the row's time; the server
+ * only compares it with its own `updated_at` to reject an edit that is older than what it already
+ * holds (see migration 0003), so a restarted or long-offline device cannot overwrite newer data.
  */
-export function toRemoteRow(store: SyncStore, row: SyncRow): Record<string, unknown> {
+export function toRemoteRow(store: SyncStore, row: SyncRow, userId?: string): Record<string, unknown> {
   const spec = TABLES[store];
-  const out: Record<string, unknown> = { id: row.id, deleted_at: row.deletedAt ?? null };
+  const id = store === "settings" && userId ? userId : row.id;
+  const out: Record<string, unknown> = { id, deleted_at: row.deletedAt ?? null, client_updated_at: row.updatedAt };
   for (const field of spec.fields) {
     const value = row[field];
     if (value !== undefined && value !== null) out[camelToSnake(field)] = value;
@@ -135,7 +158,8 @@ export function toRemoteRow(store: SyncStore, row: SyncRow): Record<string, unkn
 /** A row read from Supabase -> camelCase object for `applyRemote`. Unknown columns (user_id) are dropped. */
 export function fromRemoteRow(store: SyncStore, raw: Record<string, unknown>): Record<string, unknown> {
   const spec = TABLES[store];
-  const out: Record<string, unknown> = { id: raw.id, updatedAt: raw.updated_at, deletedAt: raw.deleted_at };
+  const id = store === "settings" ? LOCAL_SETTINGS_ID : raw.id;
+  const out: Record<string, unknown> = { id, updatedAt: raw.updated_at, deletedAt: raw.deleted_at };
   for (const field of [...spec.fields, ...spec.nullable]) {
     const value = raw[camelToSnake(field)];
     if (value !== undefined) out[snakeToCamel(camelToSnake(field))] = value;

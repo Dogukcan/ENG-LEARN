@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SyncState } from "../sync/engine";
-import { RESEND_SECONDS, accountDot, accountPanel, isEmailShape, relativeTimeTr, resendSecondsLeft } from "./accountView";
+import { RESEND_SECONDS, accountDot, accountPanel, cleanCodeInput, isEmailShape, relativeTimeTr, resendSecondsLeft } from "./accountView";
 
 const sync = (patch: Partial<SyncState> = {}): SyncState => ({
   status: "idle",
@@ -21,6 +21,13 @@ describe("accountPanel", () => {
     expect(accountPanel({ ...base, sync: sync({ pendingCount: 3 }) })).toBe("pending");
     expect(accountPanel({ ...base, sync: sync({ status: "offline" }) })).toBe("pending");
     expect(accountPanel({ ...base, sync: sync({ status: "error", lastError: "x" }) })).toBe("error");
+  });
+
+  it("asks about the other account's data before showing anything else", () => {
+    expect(accountPanel({ ...base, sync: sync({ status: "disabled", foreignData: true }) })).toBe("switch");
+    expect(accountDot({ ...base, sync: sync({ foreignData: true }) }).tone).toBe("pending");
+    // Signed out: the usual sign-in views, whatever the flag says.
+    expect(accountPanel({ ...base, signedIn: false, sync: sync({ foreignData: true }) })).toBe("out");
   });
 
   it("an error wins over pending changes", () => {
@@ -68,5 +75,13 @@ describe("isEmailShape", () => {
     expect(isEmailShape(" ad@ornek.com ")).toBe(true);
     expect(isEmailShape("ad@ornek")).toBe(false);
     expect(isEmailShape("")).toBe(false);
+  });
+});
+
+describe("cleanCodeInput", () => {
+  it("keeps only digits and cuts at 6", () => {
+    expect(cleanCodeInput("123 456")).toBe("123456");
+    expect(cleanCodeInput("12ab34")).toBe("1234");
+    expect(cleanCodeInput("12345678")).toBe("123456");
   });
 });
