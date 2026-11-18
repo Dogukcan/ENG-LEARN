@@ -8,6 +8,7 @@ import { KelimeScreen } from './screens/KelimeScreen.tsx'
 import { KonusmaScreen } from './screens/KonusmaScreen.tsx'
 import { OkumaScreen } from './screens/OkumaScreen.tsx'
 import { useRepoData } from './data/react.ts'
+import { TimerProvider } from './features/timer/TimerProvider.tsx'
 
 const VALID_TAB_IDS = new Set<TabId>(TABS.map((t) => t.id))
 
@@ -23,7 +24,7 @@ function parseTabFromHash(hash: string): TabId {
   return 'bugun'
 }
 
-export function App() {
+function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>(() =>
     typeof window !== 'undefined' ? parseTabFromHash(window.location.hash) : 'bugun',
   )
@@ -86,6 +87,16 @@ export function App() {
 
       <TabBar activeTab={activeTab} onSelectTab={handleSelectTab} count={inboxCount ?? 0} />
     </div>
+  )
+}
+
+// One timer for the whole app: every screen reads it with useTimer(), and a running timer keeps
+// counting while the user switches tabs. The provider wraps the shell so all screens share it.
+export function App() {
+  return (
+    <TimerProvider>
+      <AppShell />
+    </TimerProvider>
   )
 }
 
