@@ -112,7 +112,7 @@ describe("database upgrade", () => {
     expect((await repo.cards.getReviewQueue(NOW)).dueTotal).toBe(0);
 
     const raw = await openDB(name);
-    expect(raw.version).toBe(4);
+    expect(raw.version).toBe(5);
     expect([...raw.objectStoreNames].sort()).toEqual(
       [
         "activity", "books", "cards", "inbox", "reviewLogs", "settings", "words",
@@ -572,7 +572,7 @@ describe("database upgrade to version 3 (normalized keys)", () => {
     const repo = createIndexedDbRepository(name);
     await repo.books.list();
     const raw = await openDB(name);
-    expect(raw.version).toBe(4);
+    expect(raw.version).toBe(5);
     const keys = Object.fromEntries((await raw.getAll("words")).map((w) => [w.id, w.normalized]));
     // w2 already held the canonical key, so it keeps it; w1 (older) cannot take it and keeps its old key.
     expect(keys.w2).toBe("don't");

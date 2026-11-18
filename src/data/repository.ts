@@ -380,6 +380,12 @@ export interface Repository {
      * back. Unique keys (word, video, card per word) are respected: see `ApplyRemoteResult`.
      */
     applyRemote(store: SyncStore, rows: unknown[]): Promise<ApplyRemoteResult>;
+    /**
+     * Delete EVERY local record (all stores, tombstones included) and put the two fixed seed
+     * books back. For "another account signed in on this device" and "delete this device's
+     * data". It does not touch the sync cursors; the caller resets them. Notifies subscribers.
+     */
+    clearLocalData(): Promise<void>;
   };
 }
 

@@ -30,7 +30,7 @@ describe("seeding", () => {
       ["Reader at Work 2", "RW2", 1, 1],
     ]);
     for (const book of books) {
-      expect(book.id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(book.id).toMatch(/^seed-rw[12]$/); // fixed ids so two devices share one row
     }
   });
 

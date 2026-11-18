@@ -97,8 +97,9 @@ import type {
  * apostrophes and repeated spaces.
  * Version 4 (sync) gives every record `updatedAt`, adds a `by-updatedAt` index to every store,
  * and adds the stores `videos`, `speakingSessions` and `speakingErrors`.
+ * Version 5 gives the two seed books fixed ids and merges the old random-id copies into them.
  */
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /**
  * Version 3 upgrade step: recompute `normalized` for every stored record with the current
@@ -148,6 +149,7 @@ interface LooseStore {
   put(value: Loose, key?: string): Promise<unknown>;
   delete(key: string): Promise<unknown>;
   index(name: string): { get(key: string): Promise<Loose | undefined> };
+  getAll(): Promise<Loose[]>;
 }
 
 /**
@@ -239,12 +241,82 @@ interface EngLearnDB extends DBSchema {
 type Db = IDBPDatabase<EngLearnDB>;
 type Tx = IDBPTransaction<EngLearnDB, StoreNames<EngLearnDB>[], "readwrite">;
 
+/**
+ * Fixed ids for the two paper books. Why fixed: every device used to invent its own random ids,
+ * so two devices signing in to the same account pushed two "RW1" rows and the reader saw four
+ * books. With one id per seed book, both devices write the same row and last write wins merges them.
+ */
+const SEED_BOOK_IDS: Record<string, string> = { RW1: "seed-rw1", RW2: "seed-rw2" };
+
 function seedBooks(): Book[] {
   const now = new Date().toISOString();
   return [
-    { id: crypto.randomUUID(), title: "Reader at Work 1", shortName: "RW1", unit: 1, page: 1, updatedAt: now },
-    { id: crypto.randomUUID(), title: "Reader at Work 2", shortName: "RW2", unit: 1, page: 1, updatedAt: now },
+    { id: SEED_BOOK_IDS.RW1, title: "Reader at Work 1", shortName: "RW1", unit: 1, page: 1, updatedAt: now },
+    { id: SEED_BOOK_IDS.RW2, title: "Reader at Work 2", shortName: "RW2", unit: 1, page: 1, updatedAt: now },
   ];
+}
+
+/**
+ * Collapse every live RW1 / RW2 copy that does not have the fixed seed id into the fixed row.
+ * The copy with the newest `updatedAt` donates its title and position (the most recent reading
+ * progress wins, the same rule as sync). The other copies become tombstones, and everything that
+ * pointed to a copy (the active book setting, the book of an inbox item or word) is re-pointed to
+ * the fixed id. Safe to run again: with no extra copies it writes nothing. It runs in the version 5
+ * upgrade and again after books arrive from the server, because another device that has not
+ * upgraded yet can still send its random-id copies.
+ */
+async function mergeSeedBookCopies(
+  stores: { books: LooseStore; settings: LooseStore; inbox: LooseStore; words: LooseStore },
+  now: Date,
+): Promise<void> {
+  const all = await stores.books.getAll();
+  const isLiveRow = (book: Loose): boolean => typeof book.deletedAt !== "string";
+  const idMap = new Map<string, string>();
+  for (const [shortName, seedId] of Object.entries(SEED_BOOK_IDS)) {
+    const named = all.filter((book) => book.shortName === shortName);
+    const copies = named.filter((book) => book.id !== seedId && isLiveRow(book));
+    if (copies.length === 0) continue;
+    // References may point to old tombstoned copies too, so map those ids as well.
+    for (const book of named) if (book.id !== seedId) idMap.set(book.id as string, seedId);
+
+    const live = named.filter(isLiveRow);
+    const donor = live.reduce((best, book) => ((book.updatedAt as string) > (best.updatedAt as string) ? book : best));
+    // The merged row must be newer than every row it replaces, the old seed tombstone included.
+    const newest = named.reduce((max, book) => ((book.updatedAt as string) > max ? (book.updatedAt as string) : max), "");
+    await stores.books.put({
+      id: seedId,
+      title: donor.title,
+      shortName,
+      unit: donor.unit,
+      page: donor.page,
+      updatedAt: stampFrom(now, newest),
+    });
+    for (const copy of copies) {
+      await stores.books.put(tombstone(copy as { updatedAt: string; deletedAt?: string }, now));
+    }
+  }
+  if (idMap.size === 0) return;
+
+  const settings = await stores.settings.get(SETTINGS_KEY);
+  const activeId = settings?.activeBookId;
+  if (settings && typeof activeId === "string" && idMap.has(activeId)) {
+    await stores.settings.put(
+      { ...settings, activeBookId: idMap.get(activeId), updatedAt: stampFrom(now, settings.updatedAt as string | undefined) },
+      SETTINGS_KEY,
+    );
+  }
+  for (const store of [stores.inbox, stores.words]) {
+    for (const record of await store.getAll()) {
+      const source = record.source as { kind?: string; bookId?: string } | undefined;
+      if (source?.kind === "kitap" && typeof source.bookId === "string" && idMap.has(source.bookId)) {
+        await store.put({
+          ...record,
+          source: { ...source, bookId: idMap.get(source.bookId) },
+          updatedAt: stampFrom(now, record.updatedAt as string | undefined),
+        });
+      }
+    }
+  }
 }
 
 /** Trim optional text; blank text becomes "not given" (undefined). */
@@ -496,6 +568,16 @@ export function createIndexedDbRepository(
                 id: SETTINGS_KEY,
               }));
             }
+          }
+          if (oldVersion >= 1 && oldVersion < 5) {
+            // Version 5: old devices hold random-id seed books. A brand-new database (0) is
+            // seeded with the fixed ids already. Only awaits on IndexedDB requests happen here.
+            const loose = (name: "books" | "settings" | "inbox" | "words") =>
+              transaction.objectStore(name) as unknown as LooseStore;
+            await mergeSeedBookCopies(
+              { books: loose("books"), settings: loose("settings"), inbox: loose("inbox"), words: loose("words") },
+              new Date(),
+            );
           }
         },
         // If another tab or the home-screen app opens a newer DB version in a future phase,
@@ -1306,7 +1388,30 @@ export function createIndexedDbRepository(
             result.applied += 1;
           }
         });
+        if (store === "books" && result.applied > 0) {
+          // A device that has not upgraded yet may still send random-id RW1/RW2 copies.
+          await inTransaction(["books", "settings", "inbox", "words"], async (tx) => {
+            const loose = (name: "books" | "settings" | "inbox" | "words") =>
+              tx.objectStore(name) as unknown as LooseStore;
+            await mergeSeedBookCopies(
+              { books: loose("books"), settings: loose("settings"), inbox: loose("inbox"), words: loose("words") },
+              new Date(),
+            );
+          });
+        }
         return result;
+      },
+
+      async clearLocalData(): Promise<void> {
+        const names = [
+          "books", "inbox", "words", "activity", "cards", "reviewLogs",
+          "settings", "videos", "speakingSessions", "speakingErrors",
+        ] as const;
+        await inTransaction([...names], async (tx) => {
+          for (const name of names) await tx.objectStore(name).clear();
+          // The app cannot work without its two books, so they come back (fresh, fixed ids).
+          for (const book of seedBooks()) await tx.objectStore("books").put(book);
+        });
       },
     },
   };
@@ -1350,6 +1455,10 @@ export function createIndexedDbRepository(
         const result = await base.sync.applyRemote(store, rows);
         if (result.applied > 0) notify();
         return result;
+      },
+      async clearLocalData() {
+        await base.sync.clearLocalData();
+        notify();
       },
     },
     subscribe(listener: () => void) {
