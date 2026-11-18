@@ -36,6 +36,7 @@ export function ReviewSession({ open, onClose }: ReviewSessionProps) {
     <Sheet
       open={open}
       variant="fullscreen"
+      background="ground"
       aria-label="Kelime tekrar oturumu"
       onClose={() => endRef.current()}
     >
@@ -164,8 +165,16 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
     setCorrect(checkAnswer(typed, current.word));
   }
 
+  // iOS Safari only opens the keyboard for focus() calls made synchronously inside a user tap.
+  // The effect-based focus runs after `await`, so it is not enough. The input stays mounted (and
+  // editable, see below) between typed cards, so we focus it here, before any await.
+  function focusInputForCard(item: QueueItem | undefined) {
+    if (item && buildPrompt(item.word).kind !== "recall") inputRef.current?.focus();
+  }
+
   async function grade(value: ReviewGrade) {
     if (!current || busy) return;
+    focusInputForCard(queue?.[index + 1]);
     setBusy(true);
     setMessage("");
     try {
@@ -187,6 +196,7 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
 
   async function undo() {
     if (busy || history.length === 0) return;
+    focusInputForCard(queue?.[index - 1]);
     setBusy(true);
     setMessage("");
     try {
@@ -230,7 +240,7 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
   );
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-36px)] w-full max-w-[480px] flex-col gap-5">
+    <div className="mx-auto flex min-h-[calc(100dvh-max(16px,env(safe-area-inset-top))-20px-env(safe-area-inset-bottom))] w-full max-w-[480px] flex-col gap-5">
       <header className="flex items-center gap-3">
         {closeButton}
         <ProgressTrack
@@ -300,18 +310,22 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
                 ref={inputRef}
                 type="text"
                 value={typed}
-                onChange={(event) => setTyped(event.target.value)}
-                disabled={correct !== null}
+                // Not `disabled`/`readOnly`: iOS will not open the keyboard on a locked input, and the
+                // next card reuses this node. We ignore edits after the check instead.
+                onChange={(event) => {
+                  if (correct === null) setTyped(event.target.value);
+                }}
+                aria-readonly={correct !== null}
                 autoCapitalize="off"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
-                aria-label="Boşluğa gelecek İngilizce kelime"
+                aria-label={prompt.kind === "cloze" ? "Boşluğa gelecek İngilizce kelime" : "Bu anlamın İngilizcesi"}
                 placeholder="Kelimeyi yaz…"
                 className={cx(
                   "h-14 w-full rounded-[14px] border border-muted bg-surface px-4 text-[18px] font-medium leading-[1.2] text-text",
                   "focus:border-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text",
-                  "disabled:opacity-85",
+                  correct !== null && "opacity-85",
                 )}
               />
               {/* The submit button lives inside the form so Enter in the input submits. */}
@@ -343,7 +357,7 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
           <div className="mt-auto flex flex-col gap-3">
             {prompt.kind === "recall" && correct === null ? (
               <Button ref={revealRef} variant="primary-block" block="kelime" onClick={() => check()}>
-                Cevabı göster
+                Kendini değerlendir
               </Button>
             ) : null}
 
