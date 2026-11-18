@@ -59,8 +59,45 @@ import type {
  * Version 2 (Faz 2) adds the `cards` and `reviewLogs` stores. A bump is needed because
  * IndexedDB only lets code create stores inside an upgrade, and the upgrade only runs when the
  * requested version is higher than the one saved on the device. Existing data stays untouched.
+ * Version 3 recomputes the stored `normalized` keys after normalizeWord learned about curly
+ * apostrophes and repeated spaces.
  */
-const DB_VERSION = 2;
+const DB_VERSION = 3;
+
+/**
+ * Version 3 upgrade step: recompute `normalized` for every stored record with the current
+ * normalizeWord. The by-normalized index is unique, so two records that now fold to the same key
+ * (for example "don't" and "don’t") would break the upgrade. Records already holding their
+ * canonical key keep it first; then the rest go oldest first. A record whose new key is taken
+ * keeps its old key, so nothing is deleted and no card loses its word. The old key contains a
+ * curly apostrophe or a double space, which normalizeWord never produces, so it cannot clash
+ * later. Each such case is reported with console.warn.
+ */
+async function recomputeNormalizedKeys(store: {
+  getAll(): Promise<Array<{ id: string; word?: string; lemma?: string; normalized: string; createdAt: string }>>;
+  put(value: never): Promise<unknown>;
+}): Promise<void> {
+  const records = await store.getAll();
+  const claimed = new Set<string>();
+  const pending: typeof records = [];
+  for (const record of records) {
+    const canonical = normalizeWord(record.word ?? record.lemma ?? "");
+    if (record.normalized === canonical) claimed.add(canonical);
+    else pending.push(record);
+  }
+  pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const record of pending) {
+    const canonical = normalizeWord(record.word ?? record.lemma ?? "");
+    if (claimed.has(canonical)) {
+      console.warn(
+        `[eng-learn] db v3: "${record.id}" kept old key "${record.normalized}" because "${canonical}" belongs to an older record`,
+      );
+      continue;
+    }
+    claimed.add(canonical);
+    await store.put({ ...record, normalized: canonical } as never);
+  }
+}
 
 /** Settings are a single record stored under this fixed key. */
 const SETTINGS_KEY = "app";
@@ -198,7 +235,7 @@ export function createIndexedDbRepository(
   function db(): Promise<Db> {
     if (!dbPromise) {
       dbPromise = openDB<EngLearnDB>(dbName, DB_VERSION, {
-        upgrade(database, oldVersion, _newVersion, transaction) {
+        async upgrade(database, oldVersion, _newVersion, transaction) {
           // oldVersion is 0 when the database is brand new on this device.
           if (oldVersion < 1) {
             database.createObjectStore("books", { keyPath: "id" });
@@ -235,6 +272,13 @@ export function createIndexedDbRepository(
             const reviewLogs = database.createObjectStore("reviewLogs", { keyPath: "id" });
             reviewLogs.createIndex("by-reviewedAt", "reviewedAt");
             reviewLogs.createIndex("by-cardId", "cardId");
+          }
+          if (oldVersion >= 1 && oldVersion < 3) {
+            // Brand-new databases (0) start with keys computed by the current normalizeWord, so
+            // only older data needs recomputing. No other awaits come before this, which keeps
+            // the upgrade transaction alive.
+            await recomputeNormalizedKeys(transaction.objectStore("inbox"));
+            await recomputeNormalizedKeys(transaction.objectStore("words"));
           }
         },
         // If another tab or the home-screen app opens a newer DB version in a future phase,

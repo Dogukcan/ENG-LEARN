@@ -199,9 +199,18 @@ export interface Repository {
 
 // ---------- Small pure helpers shared by every implementation ----------
 
-/** The duplicate-check key for a word: outer spaces removed, lower case. */
+/**
+ * The duplicate-check key for a word: lower case, outer spaces removed, runs of spaces collapsed
+ * and curly apostrophes folded to a plain one. Text copied from books or typed on a phone with
+ * smart punctuation uses the curly form, so without this "don't" and "don’t" would be two words.
+ * Changing this changes stored keys: the database version 3 upgrade recomputes them.
+ */
 export function normalizeWord(word: string): string {
-  return word.trim().toLowerCase();
+  return word
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u02BC]/g, "'")
+    .replace(/\s+/g, " ");
 }
 
 /**

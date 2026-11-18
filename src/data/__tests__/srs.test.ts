@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { openDB } from "idb";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createIndexedDbRepository } from "../indexeddb";
 import type { Repository } from "../repository";
 import { LEECH_THRESHOLD, recallProbability } from "../srs/scheduler";
@@ -63,7 +63,7 @@ async function reachReview(
 }
 
 describe("database upgrade", () => {
-  it("keeps books, inbox and words when a version 1 database is upgraded to version 2", async () => {
+  it("keeps books, inbox and words when a version 1 database is upgraded to the latest version", async () => {
     const name = freshDbName();
 
     // Build a version 1 database by hand, exactly as the Faz 1 code created it.
@@ -111,7 +111,7 @@ describe("database upgrade", () => {
     expect((await repo.cards.getReviewQueue(NOW)).dueTotal).toBe(0);
 
     const raw = await openDB(name);
-    expect(raw.version).toBe(2);
+    expect(raw.version).toBe(3);
     expect([...raw.objectStoreNames].sort()).toEqual(
       ["activity", "books", "cards", "inbox", "reviewLogs", "settings", "words"].sort(),
     );
@@ -518,5 +518,83 @@ describe("undoLastReview", () => {
     const undone = await repo.cards.undoLastReview();
     expect(undone).toEqual({ ok: true, card: beforeLast });
     expect(await repo.cards.listLeeches()).toEqual([]);
+  });
+});
+
+describe("database upgrade to version 3 (normalized keys)", () => {
+  async function makeV2(name: string) {
+    const db = await openDB(name, 2, {
+      upgrade(database) {
+        database.createObjectStore("books", { keyPath: "id" });
+        const inbox = database.createObjectStore("inbox", { keyPath: "id" });
+        inbox.createIndex("by-normalized", "normalized", { unique: true });
+        inbox.createIndex("by-createdAt", "createdAt");
+        const words = database.createObjectStore("words", { keyPath: "id" });
+        words.createIndex("by-normalized", "normalized", { unique: true });
+        words.createIndex("by-status", "status");
+        const activity = database.createObjectStore("activity", { keyPath: "id" });
+        activity.createIndex("by-startedAt", "startedAt");
+        database.createObjectStore("settings");
+        const cards = database.createObjectStore("cards", { keyPath: "id" });
+        cards.createIndex("by-wordId", "wordId", { unique: true });
+        cards.createIndex("by-due", "dueAt");
+        const logs = database.createObjectStore("reviewLogs", { keyPath: "id" });
+        logs.createIndex("by-reviewedAt", "reviewedAt");
+        logs.createIndex("by-cardId", "cardId");
+      },
+    });
+    return db;
+  }
+  const base = { status: "known", source: { kind: "diger" }, updatedAt: "2026-11-01T08:00:00.000Z" };
+
+  it("recomputes keys, and keeps the older record's key on a collision", async () => {
+    const name = freshDbName();
+    const db = await makeV2(name);
+    await db.put("words", { ...base, id: "w1", lemma: "Don\u2019t", normalized: "don\u2019t", createdAt: "2026-11-01T08:00:00.000Z" });
+    await db.put("words", { ...base, id: "w2", lemma: "don't", normalized: "don't", createdAt: "2026-11-02T08:00:00.000Z" });
+    await db.put("words", { ...base, id: "w3", lemma: "grab  a coffee", normalized: "grab  a coffee", createdAt: "2026-11-03T08:00:00.000Z" });
+    await db.put("words", { ...base, id: "w4", lemma: "Do\u2019nt", normalized: "do\u2019nt", createdAt: "2026-11-04T08:00:00.000Z" });
+    await db.put("words", { ...base, id: "w5", lemma: "do'nt", normalized: "do'nt", createdAt: "2026-11-05T08:00:00.000Z" });
+    await db.put("inbox", { id: "i1", word: "it\u2019s", normalized: "it\u2019s", source: { kind: "diger" }, createdAt: "2026-11-01T08:00:00.000Z" });
+    db.close();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const repo = createIndexedDbRepository(name);
+    await repo.books.list();
+    const raw = await openDB(name);
+    expect(raw.version).toBe(3);
+    const keys = Object.fromEntries((await raw.getAll("words")).map((w) => [w.id, w.normalized]));
+    // w2 already held the canonical key, so it keeps it; w1 (older) cannot take it and keeps its old key.
+    expect(keys.w2).toBe("don't");
+    expect(keys.w1).toBe("don\u2019t");
+    expect(keys.w3).toBe("grab a coffee");
+    // w4 is older than w5 but w5 already holds the canonical key.
+    expect(keys.w5).toBe("do'nt");
+    expect(keys.w4).toBe("do\u2019nt");
+    expect((await raw.getAll("inbox"))[0].normalized).toBe("it's");
+    expect((await raw.getAll("words")).length).toBe(5);
+    expect(warn).toHaveBeenCalledTimes(2);
+    raw.close();
+    warn.mockRestore();
+
+    // The new key is what duplicate detection sees now.
+    const dup = await repo.inbox.add({ word: "IT'S", source: { kind: "diger" } });
+    expect(dup.ok).toBe(false);
+  });
+
+  it("gives the older record the canonical key when neither holds it yet", async () => {
+    const name = freshDbName();
+    const db = await makeV2(name);
+    await db.put("words", { ...base, id: "a", lemma: "x\u2019y", normalized: "x\u2019y", createdAt: "2026-11-01T08:00:00.000Z" });
+    await db.put("words", { ...base, id: "b", lemma: "x\u2018y", normalized: "x\u2018y", createdAt: "2026-11-02T08:00:00.000Z" });
+    db.close();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const repo = createIndexedDbRepository(name);
+    await repo.books.list();
+    const raw = await openDB(name);
+    const keys = Object.fromEntries((await raw.getAll("words")).map((w) => [w.id, w.normalized]));
+    expect(keys).toEqual({ a: "x'y", b: "x\u2018y" });
+    raw.close();
+    vi.restoreAllMocks();
   });
 });

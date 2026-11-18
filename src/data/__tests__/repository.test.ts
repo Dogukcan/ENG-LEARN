@@ -188,7 +188,7 @@ describe("triage", () => {
 
     // Put a record with the same unique `normalized` key directly into `words`, so the
     // `words.put` inside `triage` fails with ConstraintError and aborts the transaction.
-    // No version number: open whatever version the repository created (now 2).
+    // No version number: open whatever version the repository created (now 3).
     const rawDb = await openDB(name);
     await rawDb.put("words", {
       id: "conflict-blocker",

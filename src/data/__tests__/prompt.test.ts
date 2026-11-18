@@ -5,7 +5,7 @@ describe("buildPrompt", () => {
   it("makes a cloze from the sentence, case-insensitive, with the meaning as hint", () => {
     expect(
       buildPrompt({ lemma: "anchor", sentence: "The Anchor was heavy.", meaningTr: "çapa" }),
-    ).toEqual({ kind: "cloze", text: "The ____ was heavy.", answer: "anchor", hint: "çapa" });
+    ).toEqual({ kind: "cloze", text: "The ____ was heavy.", answer: "anchor", accepted: ["anchor"], hint: "çapa" });
   });
 
   it("has no hint when there is no meaning", () => {
@@ -13,6 +13,7 @@ describe("buildPrompt", () => {
       kind: "cloze",
       text: "An ____.",
       answer: "anchor",
+      accepted: ["anchor"],
     });
   });
 
@@ -73,5 +74,50 @@ describe("checkAnswer", () => {
     expect(checkAnswer("Harbour", word)).toBe(true);
     expect(checkAnswer("harbor", word)).toBe(true);
     expect(checkAnswer("harbr", word)).toBe(false);
+  });
+});
+
+describe("review fixes: inflected answers, apostrophes, alternatives, punctuation", () => {
+  it("accepts the inflected form that was blanked, and still the lemma", () => {
+    const word = { lemma: "walk", sentence: "She walked home." };
+    expect(buildPrompt(word)).toMatchObject({ kind: "cloze", accepted: ["walked"] });
+    expect(checkAnswer("walked", word)).toBe(true);
+    expect(checkAnswer("Walked", word)).toBe(true);
+    expect(checkAnswer("walk", word)).toBe(true);
+    expect(checkAnswer("walking", word)).toBe(false);
+  });
+
+  it("builds a cloze for a curly apostrophe sentence and accepts either apostrophe", () => {
+    const word = { lemma: "don't", sentence: "I don\u2019t know." };
+    expect(buildPrompt(word)).toMatchObject({ kind: "cloze", text: "I ____ know." });
+    expect(checkAnswer("don\u2019t", word)).toBe(true);
+    expect(checkAnswer("don't", word)).toBe(true);
+  });
+
+  it("builds a cloze from an alternative spelling", () => {
+    const word = { lemma: "harbor", alternatives: ["harbour"], sentence: "The harbour is busy." };
+    expect(buildPrompt(word)).toMatchObject({ kind: "cloze", text: "The ____ is busy." });
+    expect(checkAnswer("harbour", word)).toBe(true);
+    expect(checkAnswer("harbor", word)).toBe(true);
+  });
+
+  it("tries the longest variant first", () => {
+    const word = { lemma: "color", alternatives: ["colour"], sentence: "A colours chart." };
+    expect(buildPrompt(word)).toMatchObject({ text: "A ____ chart." });
+  });
+
+  it("ignores outer punctuation and repeated inner spaces in the answer", () => {
+    const word = { lemma: "grab a coffee" };
+    expect(checkAnswer("grab  a   coffee", word)).toBe(true);
+    expect(checkAnswer("grab a coffee.", word)).toBe(true);
+    expect(checkAnswer("  \"Grab a coffee!\" ", word)).toBe(true);
+    expect(checkAnswer("coffee.", { lemma: "coffee" })).toBe(true);
+    expect(checkAnswer("...", { lemma: "coffee" })).toBe(false);
+  });
+
+  it("matches a phrase in the sentence across repeated spaces", () => {
+    expect(buildPrompt({ lemma: "grab a coffee", sentence: "Let's grab  a coffee." })).toMatchObject({
+      text: "Let's ____.",
+    });
   });
 });
