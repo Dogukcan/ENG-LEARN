@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Flat turquoise ground (light --ground token), no gradient. -->
+  <rect width="512" height="512" fill="#e2f3f1"/>
+  <!-- Heavy sans letters in the Kelime ink colour. Kept inside the central 80% so the same art is maskable-safe. -->
+  <text x="256" y="256" text-anchor="middle" dominant-baseline="central"
+        font-family="Manrope, 'Arial Black', 'Segoe UI Black', sans-serif"
+        font-weight="800" font-size="230" letter-spacing="-8" fill="#0a3a80">EN</text>
+</svg>

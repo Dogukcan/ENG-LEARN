@@ -13,6 +13,16 @@
     -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#e2f3f1" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1a1a" />
+    <!--
+      iOS Safari ignores most of the web manifest, so the home-screen behaviour is declared explicitly:
+      standalone mode, a status bar that matches the light ground, a short title and a 180px icon.
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ENG" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <title>ENG-LEARN</title>
     <!--
       Load Manrope weights 400/500/600/700 with display=swap so text stays readable immediately
