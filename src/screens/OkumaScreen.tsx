@@ -1,23 +1,54 @@
-/*
- * Faz 1 placeholder for the Okuma (Reading) screen.
- * Keeps the exact header hierarchy from design/drafts/today-d.html without fake data.
+import { useRepoData } from "../data/react";
+import { BookPanel } from "../features/okuma/BookPanel.tsx";
+import { CapturePanel } from "../features/okuma/CapturePanel.tsx";
+import { CapturedToday } from "../features/okuma/CapturedToday.tsx";
+import { capturedToday, doneMinutes, titleProgress } from "../features/okuma/logic.ts";
+import { useTimer } from "../features/timer/TimerProvider.tsx";
+import { toLocalDay } from "../data";
+
+/**
+ * Okuma screen (draft D). This component loads the data and arranges the pieces;
+ * the pieces and the pure rules live in src/features/okuma.
  */
 export function OkumaScreen() {
+  const { running, elapsedSeconds } = useTimer();
+
+  // Reloaded by useRepoData after every repository write: a saved word, a page step, a stopped timer.
+  const { data } = useRepoData(async (repo) => {
+    const now = new Date();
+    const [books, settings, inbox, minutes] = await Promise.all([
+      repo.books.list(),
+      repo.settings.get(),
+      repo.inbox.list(),
+      repo.activity.minutesPerBlockForDay(toLocalDay(now)),
+    ]);
+    // Without a chosen book (first launch) the first one is shown, so the screen is never empty.
+    const activeBook = books.find((book) => book.id === settings.activeBookId) ?? books[0];
+    return { books, activeBook, inbox, plan: settings.blockPlanMinutes.okuma, loggedMinutes: minutes.okuma, now };
+  }, []);
+
+  const done = data ? doneMinutes(data.loggedMinutes, running === "okuma" ? elapsedSeconds : 0) : 0;
+
   return (
     <section aria-labelledby="okuma-screen-title" className="flex flex-col gap-3.5">
-      <header className="flex flex-col gap-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <h1
-            id="okuma-screen-title"
-            className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text"
-          >
-            Okuma
-          </h1>
-        </div>
-        <p className="text-small leading-[1.35] text-muted">
-          Bu ekran Faz 2&apos;de gelecek.
-        </p>
+      <header className="flex items-baseline justify-between gap-3">
+        <h1 id="okuma-screen-title" className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">
+          Okuma
+        </h1>
+        {data ? (
+          <span className="text-body font-semibold whitespace-nowrap text-text tabular-nums">
+            {titleProgress(done, data.plan)}
+          </span>
+        ) : null}
       </header>
+
+      {data?.activeBook ? (
+        <>
+          <BookPanel books={data.books} activeBook={data.activeBook} />
+          <CapturePanel book={data.activeBook} />
+          <CapturedToday rows={capturedToday(data.inbox, data.books, data.now)} />
+        </>
+      ) : null}
     </section>
-  )
+  );
 }
