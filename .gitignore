@@ -17,3 +17,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# Browser automation output
+.playwright-mcp/
