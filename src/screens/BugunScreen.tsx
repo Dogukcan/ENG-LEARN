@@ -23,6 +23,7 @@ import {
   pickNextBlock,
 } from "../features/bugun/todayLogic";
 import type { MinutesByBlock } from "../features/bugun/todayLogic";
+import { AccountButton } from "../features/hesap/AccountSheet";
 import { useTimer } from "../features/timer/TimerProvider";
 import { ReviewSession } from "../features/review/ReviewSession";
 import { recordReviewMinutes } from "../features/review/recordReview";
@@ -138,16 +139,20 @@ export function BugunScreen() {
   return (
     <section aria-labelledby="bugun-screen-title" className="flex flex-col gap-3.5">
       <header className="flex flex-col gap-1">
-        <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <h1 id="bugun-screen-title" className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">
             Bugün
           </h1>
-          <span className="num text-body font-semibold whitespace-nowrap text-text">
-            {totalDone}
-            {NBSP}/{NBSP}
-            {target}
-            {NBSP}dk
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="num text-body font-semibold whitespace-nowrap text-text">
+              {totalDone}
+              {NBSP}/{NBSP}
+              {target}
+              {NBSP}dk
+            </span>
+            {/* Importing the account button also starts the sync engine (see features/sync/runtime.ts). */}
+            <AccountButton />
+          </div>
         </div>
         <p className="text-small leading-[1.35] text-muted">{findingLine({ totalDone, minimum, next })}</p>
       </header>
