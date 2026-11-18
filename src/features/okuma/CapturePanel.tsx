@@ -43,6 +43,12 @@ export function CapturePanel({ book }: { book: Book }) {
       setWord("");
       setSentence("");
       wordRef.current?.focus();
+    } catch {
+      // A real storage failure (quota, aborted transaction, lost connection) rejects the promise.
+      // Without this the user saw nothing and could not tell if the word was saved. The text stays in the field.
+      setError("Kaydedilemedi. Tekrar dene.");
+      setLiveMessage("");
+      wordRef.current?.focus();
     } finally {
       savingRef.current = false;
     }

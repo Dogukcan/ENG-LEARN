@@ -61,9 +61,9 @@ export function PrepareStep({ scenario, onScenarioChange, targetWords }: Prepare
                 aria-pressed={selected}
                 onClick={() => onScenarioChange(item.id)}
                 className={cx(
-                  "flex min-h-24 flex-col justify-between gap-2 rounded-card border-2 p-3 text-left",
+                  "flex min-h-[104px] flex-col justify-between gap-2 rounded-[14px] border-2 p-3 text-left",
                   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text",
-                  selected ? "border-konusma-mark bg-konusma-tile text-konusma-ink" : "border-transparent bg-surface text-text",
+                  selected ? "border-text bg-konusma-tile text-konusma-ink" : "border-transparent bg-surface text-text",
                 )}
               >
                 <span className="text-body leading-[1.25] font-semibold">{item.title}</span>

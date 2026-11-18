@@ -7,6 +7,7 @@ import { AddSheet } from "../features/dinleme/AddSheet.tsx";
 import { ListeningSummary } from "../features/dinleme/ListeningSummary.tsx";
 import { BAR_DAYS, doneWithRunning, formatDoneOfPlan, listCountText } from "../features/dinleme/logic/screen.ts";
 import { TodoList, WatchedList } from "../features/dinleme/VideoCards.tsx";
+import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
 import { useTimer } from "../features/timer/TimerProvider.tsx";
 
 type ListTab = "todo" | "watched";
@@ -31,7 +32,7 @@ export function DinlemeScreen() {
   const [status, setStatus] = useState<Status | null>(null);
   const undoRef = useRef<HTMLButtonElement>(null);
 
-  const { data, error } = useRepoData(async (repo) => {
+  const { data, error, reload } = useRepoData(async (repo) => {
     const now = new Date();
     const today = toLocalDay(now);
     const [settings, todo, watched, total, days] = await Promise.all([
@@ -52,6 +53,9 @@ export function DinlemeScreen() {
       todayMinutes: dayMinutes[dayMinutes.length - 1] ?? 0,
     };
   }, []);
+
+  // The 14-day bars and today's minutes are read at load time; refresh them across midnight.
+  useReloadOnWake(reload);
 
   // The card that held focus is gone after "İzledim", so move focus to "Geri al" (as the draft does).
   // An effect (not a timeout) runs after React has really drawn the button.

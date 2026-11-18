@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, LiveRegion, Panel, TextArea } from "../../components/ui/index.ts";
 import { repository } from "../../data";
 import type { SaveReportResult, SpeakingReport } from "../../data";
 import { categoryLabel, wordsLine } from "./logic/session.ts";
+import { loadReportDraft, saveReportDraft } from "./logic/sessionState.ts";
 import { parseReport } from "./logic/reportSchema.ts";
 
 interface ReportStepProps {
@@ -16,7 +17,8 @@ interface Processed {
 
 /** Step 3: paste the AI's JSON report, check it, save it, and show what was found. */
 export function ReportStep({ scenarioId }: ReportStepProps) {
-  const [text, setText] = useState("");
+  // The pasted text survives a reload and a step change until it is processed (see logic/sessionState.ts).
+  const [text, setText] = useState(loadReportDraft);
   const [problem, setProblem] = useState("");
   const [result, setResult] = useState<Processed | null>(null);
   // The text that was already saved. "İşle" stays off for the same text, so one report can never
@@ -24,6 +26,11 @@ export function ReportStep({ scenarioId }: ReportStepProps) {
   const [savedText, setSavedText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    // After a successful save the draft is cleared, so the old report is not offered again.
+    saveReportDraft(savedText !== null && savedText === text ? "" : text);
+  }, [text, savedText]);
 
   const alreadySaved = savedText !== null && savedText === text;
   const disabled = busy || alreadySaved;
@@ -69,9 +76,10 @@ export function ReportStep({ scenarioId }: ReportStepProps) {
           spellCheck={false}
           autoCapitalize="none"
           autoComplete="off"
-          className="font-mono text-small"
+          // No text-small here: below 16px iOS Safari zooms the page when the field is focused.
+          className="font-mono"
         />
-        <Button variant="primary-block" block="konusma" disabled={disabled} onClick={onProcess}>
+        <Button variant="neutral" disabled={disabled} onClick={onProcess}>
           {alreadySaved ? "İşlendi" : "İşle"}
         </Button>
         <div role="alert" className="empty:hidden">

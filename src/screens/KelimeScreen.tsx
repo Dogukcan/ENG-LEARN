@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Button, LiveRegion, Sheet } from "../components/ui/index.ts";
 import { useRepoData } from "../data/react";
 import { AddWordForm } from "../features/kelime/AddWordForm.tsx";
@@ -6,6 +6,8 @@ import { InboxTriage } from "../features/kelime/InboxTriage.tsx";
 import { ReviewRow } from "../features/kelime/ReviewRow.tsx";
 import { ReviewSession } from "../features/review/ReviewSession.tsx";
 import { recordReviewMinutes } from "../features/review/recordReview.ts";
+import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
+import { useTimer } from "../features/timer/TimerProvider.tsx";
 
 /**
  * Kelime screen, variant 2 "Tek tek" (chosen as the default in design/ui-freeze.md).
@@ -16,6 +18,7 @@ export function KelimeScreen() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [addedCount, setAddedCount] = useState(0);
   const [reviewMessage, setReviewMessage] = useState("");
+  const timer = useTimer();
 
   // Reloaded by useRepoData after every repository write, so a review or a triage updates this screen.
   const { data, error, reload } = useRepoData(async (repo) => {
@@ -27,21 +30,9 @@ export function KelimeScreen() {
     return { inbox, queue, books };
   }, []);
 
-  // Why a timer: the queue and newToday are computed from "now" at load time. A card marked "Unuttum"
-  // becomes due 1-10 minutes later and the local day can roll over, but no repository write happens
-  // then, so without this the screen would keep showing the old state until the user leaves and returns.
-  useEffect(() => {
-    const interval = window.setInterval(reload, 60_000);
-    // Timers are throttled in background tabs, so also reload the moment the page becomes visible.
-    const onVisible = () => {
-      if (document.visibilityState === "visible") reload();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [reload]);
+  // The queue and newToday are computed from "now" at load time, so reload when the app wakes up and
+  // every minute (a card marked "Unuttum" becomes due minutes later, and the local day can roll over).
+  useReloadOnWake(reload);
 
   // Why returnFocusTo: when the inbox was empty, the "Kelime ekle" button that opened the sheet
   // disappears after the first save, so the Sheet cannot return focus to it. It falls back to the
@@ -68,7 +59,13 @@ export function KelimeScreen() {
             queue={data.queue}
             onStart={() => {
               setReviewMessage("");
-              setReviewOpen(true);
+              // One timer rule (same as Bugün): a running timer is stopped and saved first, otherwise the
+              // same minutes would be counted for both that block and Kelime.
+              const stopFirst = timer.running ? timer.stop() : Promise.resolve();
+              stopFirst.then(
+                () => setReviewOpen(true),
+                () => setReviewMessage("Süre kaydedilemedi. Tekrar dene."),
+              );
             }}
           />
           <LiveRegion visible>{reviewMessage}</LiveRegion>

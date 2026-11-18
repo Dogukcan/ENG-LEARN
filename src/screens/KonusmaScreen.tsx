@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { SegmentedControl } from "../components/ui/index.ts";
+import { useEffect, useState } from "react";
+import { LoadError, SegmentedControl } from "../components/ui/index.ts";
 import { addLocalDays, toLocalDay } from "../data";
 import { useRepoData } from "../data/react.ts";
 import { ErrorLog } from "../features/konusma/ErrorLog.tsx";
@@ -13,10 +13,11 @@ import {
   plannedDays,
   plannedDaysLine,
 } from "../features/konusma/logic/session.ts";
+import { initialStep, loadSavedSession, saveSession } from "../features/konusma/logic/sessionState.ts";
+import type { Step } from "../features/konusma/logic/sessionState.ts";
 import { doneMinutes, titleProgress } from "../features/okuma/logic.ts";
+import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
 import { useTimer } from "../features/timer/TimerProvider.tsx";
-
-type Step = "1" | "2" | "3";
 
 const STEP_OPTIONS = [
   { value: "1", label: "1 Hazırlan" },
@@ -30,12 +31,17 @@ const STEP_OPTIONS = [
  */
 export function KonusmaScreen() {
   const { running, elapsedSeconds } = useTimer();
-  const [step, setStep] = useState<Step>("1");
-  const [scenarioId, setScenarioId] = useState<string>(SCENARIOS[0]?.id ?? "");
+  // Restored after a reload (iOS may drop the app while the learner talks in another app).
+  const [saved] = useState(() => loadSavedSession(SCENARIOS.map((item) => item.id)));
+  const [step, setStep] = useState<Step>(() => initialStep(saved, running === "konusma"));
+  const [scenarioId, setScenarioId] = useState<string>(saved?.scenarioId ?? SCENARIOS[0]?.id ?? "");
+  useEffect(() => {
+    saveSession({ step, scenarioId });
+  }, [step, scenarioId]);
   const scenario = SCENARIOS.find((item) => item.id === scenarioId) ?? SCENARIOS[0];
 
   // Reloaded after every repository write: a stopped timer, a saved report.
-  const { data } = useRepoData(async (repo) => {
+  const { data, error, reload } = useRepoData(async (repo) => {
     const now = new Date();
     const today = toLocalDay(now);
     const [settings, minutes, queue, learning, errors] = await Promise.all([
@@ -53,6 +59,8 @@ export function KonusmaScreen() {
       errors,
     };
   }, []);
+
+  useReloadOnWake(reload);
 
   if (!scenario) return null;
 
@@ -80,6 +88,8 @@ export function KonusmaScreen() {
           </p>
         ) : null}
       </header>
+
+      {!data && error ? <LoadError onRetry={reload} /> : null}
 
       <SegmentedControl
         aria-label="Oturum adımı"

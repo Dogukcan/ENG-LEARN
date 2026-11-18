@@ -1,8 +1,10 @@
+import { LoadError } from "../components/ui/index.ts";
 import { useRepoData } from "../data/react";
 import { BookPanel } from "../features/okuma/BookPanel.tsx";
 import { CapturePanel } from "../features/okuma/CapturePanel.tsx";
 import { CapturedToday } from "../features/okuma/CapturedToday.tsx";
 import { capturedToday, doneMinutes, titleProgress } from "../features/okuma/logic.ts";
+import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
 import { useTimer } from "../features/timer/TimerProvider.tsx";
 import { toLocalDay } from "../data";
 
@@ -14,7 +16,7 @@ export function OkumaScreen() {
   const { running, elapsedSeconds } = useTimer();
 
   // Reloaded by useRepoData after every repository write: a saved word, a page step, a stopped timer.
-  const { data } = useRepoData(async (repo) => {
+  const { data, error, reload } = useRepoData(async (repo) => {
     const now = new Date();
     const [books, settings, inbox, minutes] = await Promise.all([
       repo.books.list(),
@@ -26,6 +28,9 @@ export function OkumaScreen() {
     const activeBook = books.find((book) => book.id === settings.activeBookId) ?? books[0];
     return { books, activeBook, inbox, plan: settings.blockPlanMinutes.okuma, loggedMinutes: minutes.okuma, now };
   }, []);
+
+  // "Today's minutes" and the captured-today list are read at load time; refresh them across midnight.
+  useReloadOnWake(reload);
 
   const done = data ? doneMinutes(data.loggedMinutes, running === "okuma" ? elapsedSeconds : 0) : 0;
 
@@ -41,6 +46,8 @@ export function OkumaScreen() {
           </span>
         ) : null}
       </header>
+
+      {!data && error ? <LoadError onRetry={reload} /> : null}
 
       {data?.activeBook ? (
         <>

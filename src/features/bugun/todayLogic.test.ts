@@ -3,6 +3,8 @@ import {
   bookLine,
   computeStrip,
   countWorkedDays,
+  dinlemeLine,
+  konusmaLine,
   displayMinutes,
   findingLine,
   lastLocalDays,
@@ -111,5 +113,26 @@ describe("displayMinutes", () => {
 describe("bookLine", () => {
   it("writes title, unit and page", () => {
     expect(bookLine({ title: "Reader at Work 1", unit: 3, page: 42 })).toBe("Reader at Work 1 · ünite 3 · s. 42");
+  });
+});
+
+describe("dinlemeLine", () => {
+  it("says there is no video when the list is empty", () => {
+    expect(dinlemeLine([])).toBe("Sıradaki video yok");
+  });
+  it("shows the first video's title", () => {
+    expect(dinlemeLine([{ title: "Slow English" }])).toBe("Slow English");
+  });
+  it("adds how many more are waiting", () => {
+    expect(dinlemeLine([{ title: "A" }, { title: "B" }, { title: "C" }])).toBe("A · +2 video");
+  });
+});
+
+describe("konusmaLine", () => {
+  it("keeps the plain line without target words", () => {
+    expect(konusmaLine(0)).toBe("Bugün okuduğunu anlat");
+  });
+  it("shows the target word count", () => {
+    expect(konusmaLine(6)).toBe("Bugün okuduğunu anlat · 6 hedef kelime");
   });
 });

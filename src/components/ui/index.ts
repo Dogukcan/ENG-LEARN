@@ -15,3 +15,4 @@ export type { LiveRegionProps } from "./LiveRegion.tsx";
 export { useReducedMotion } from "./useReducedMotion.ts";
 export { cx } from "./cx.ts";
 export type { Block } from "./cx.ts";
+export { LoadError } from "./LoadError.tsx";

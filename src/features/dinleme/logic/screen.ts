@@ -98,7 +98,8 @@ export function forecastText(
   const daysLeft = Math.ceil((goalHours * 60 - totalMinutes) / paceMinutes);
   return {
     date: formatGoalDate(day),
-    note: `Günde ortalama${NBSP}${Math.round(paceMinutes)}${NBSP}dk ile ${daysLeft}${NBSP}gün sonra`,
+    // Only the days left: the daily average is already the cell next to this one (the draft shows no repeat).
+    note: `${daysLeft}${NBSP}gün sonra`,
   };
 }
 

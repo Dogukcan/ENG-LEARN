@@ -3,6 +3,8 @@
 export interface Scenario {
   id: string;
   title: string;
+  /** Short Turkish label for the kind of talk, shown under the title on the card. */
+  kind: string;
   tasks: readonly [string, string, string];
   endCondition: string;
 }
@@ -11,6 +13,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     id: "retell-reading",
     title: "Bugün okuduğunu anlat",
+    kind: "Anlatma",
     tasks: [
       "Summarize what you read today in at least four sentences.",
       "Explain one idea from the text that surprised you and why.",
@@ -21,6 +24,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     id: "cafe-order",
     title: "Kafede sipariş ver",
+    kind: "Rol yapma",
     tasks: [
       "Order a drink and a snack, and ask one question about the menu.",
       "Politely change your order after the waiter mentions something is unavailable.",
@@ -31,6 +35,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     id: "defend-idea",
     title: "Bir fikri savun",
+    kind: "Tartışma",
     tasks: [
       "State an opinion you hold and give two reasons for it.",
       "Respond to a counter-argument without just repeating yourself.",
@@ -41,6 +46,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     id: "describe-picture",
     title: "Resmi betimle",
+    kind: "Betimleme",
     tasks: [
       "Describe what you can see in the picture: people, objects, and place.",
       "Guess what happened just before the picture was taken.",

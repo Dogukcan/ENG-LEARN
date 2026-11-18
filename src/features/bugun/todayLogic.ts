@@ -56,6 +56,22 @@ export function bookLine(book: { title: string; unit: number; page: number }): s
   return `${book.title} · ünite ${book.unit} · s. ${book.page}`;
 }
 
+/**
+ * Second line of the Dinleme row: the next video's title (the list is oldest first, so the first one
+ * is next), or the empty text when the "İzlenecek" list has nothing.
+ */
+export function dinlemeLine(todo: ReadonlyArray<{ title: string }>): string {
+  const next = todo[0];
+  if (!next) return "Sıradaki video yok";
+  return todo.length > 1 ? `${next.title} · +${todo.length - 1} video` : next.title;
+}
+
+/** Second line of the Konuşma row; the target-word count appears only when there is one. */
+export function konusmaLine(targetWordCount: number): string {
+  if (targetWordCount <= 0) return "Bugün okuduğunu anlat";
+  return `Bugün okuduğunu anlat · ${targetWordCount}${NBSP}hedef kelime`;
+}
+
 // ---------- Day strip ----------
 
 /** Gap between strip segments in px. The component uses the same number in its CSS. */

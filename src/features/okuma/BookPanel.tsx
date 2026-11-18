@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Panel, SegmentedControl } from "../../components/ui/index.ts";
 import type { SegmentedOption } from "../../components/ui/index.ts";
 import { repository } from "../../data";
@@ -18,6 +18,17 @@ export interface BookPanelProps {
 export function BookPanel({ books, activeBook }: BookPanelProps) {
   const { running, elapsedSeconds, toggle } = useTimer();
   const reading = running === "okuma";
+  const [timerFailure, setTimerFailure] = useState("");
+
+  // TimerProvider keeps the timer running when the save fails and rethrows so the caller can say so.
+  async function onToggleTimer() {
+    setTimerFailure("");
+    try {
+      await toggle("okuma");
+    } catch {
+      setTimerFailure("Süre kaydedilemedi. Sayaç çalışmaya devam ediyor, Durdur'a tekrar bas.");
+    }
+  }
 
   const options: Array<SegmentedOption<string>> = books.map((book) => ({ value: book.id, label: book.shortName }));
 
@@ -89,12 +100,13 @@ export function BookPanel({ books, activeBook }: BookPanelProps) {
         block="okuma"
         aria-pressed={reading}
         className={reading ? "tabular-nums" : undefined}
-        onClick={() => {
-          void toggle("okuma");
-        }}
+        onClick={onToggleTimer}
       >
         {reading ? `${formatClock(elapsedSeconds)} · Durdur` : "Okumaya başla"}
       </Button>
+      <p role="alert" className="text-small font-medium text-negative empty:hidden">
+        {timerFailure}
+      </p>
     </>
   );
 }

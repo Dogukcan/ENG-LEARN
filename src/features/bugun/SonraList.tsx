@@ -13,6 +13,10 @@ export interface SonraRow {
   book?: { shortName: string; title: string };
   /** Kelime only: the number of due cards shown in its tile. */
   dueCards?: number;
+  /** Dinleme only: the next video's length. Without a video the tile stays neutral. */
+  videoMinutes?: number;
+  /** Konuşma only: today's target-word count. Without words the tile stays neutral. */
+  targetWords?: number;
 }
 
 export interface SonraListProps {
@@ -49,19 +53,28 @@ function Tile({ row }: { row: SonraRow }) {
         </span>
       );
     case "dinleme":
-      // A pale green 16:9 tile (64 x 36): a placeholder for the video thumbnail.
-      return (
+      // 64 x 36 (16:9) tile that carries the next video's length, as in the draft. No video: neutral.
+      return row.videoMinutes ? (
         <span
           aria-hidden="true"
-          className={`${TILE_BASE} h-9 w-16 border-dinleme-tile-border bg-dinleme-tile`}
-        />
+          className={`${TILE_BASE} num h-9 w-16 border-dinleme-tile-border bg-dinleme-tile text-small text-dinleme-ink`}
+        >
+          {row.videoMinutes}
+          {NBSP}dk
+        </span>
+      ) : (
+        <span aria-hidden="true" className={`${TILE_BASE} h-9 w-16 border-rule bg-raised`} />
       );
     case "konusma":
-      return (
+      return row.targetWords ? (
         <span
           aria-hidden="true"
-          className={`${TILE_BASE} size-11 border-konusma-tile-border bg-konusma-tile`}
-        />
+          className={`${TILE_BASE} size-11 border-konusma-tile-border bg-konusma-tile text-body text-konusma-ink`}
+        >
+          {row.targetWords}
+        </span>
+      ) : (
+        <span aria-hidden="true" className={`${TILE_BASE} size-11 border-rule bg-raised`} />
       );
   }
 }
@@ -92,7 +105,7 @@ export function SonraList({ rows, runningBlock, runningSeconds, onPress }: Sonra
                 <span className="block text-body leading-tight font-semibold text-text">
                   {BLOCK_NAMES[row.block]}
                 </span>
-                <span className="mt-0.5 block text-small leading-[1.3] text-muted">{row.sub}</span>
+                <span className="mt-0.5 block truncate text-small leading-[1.3] text-muted">{row.sub}</span>
               </span>
               {isRunning ? (
                 <span className="num block shrink-0 text-right text-small font-semibold whitespace-nowrap text-text">

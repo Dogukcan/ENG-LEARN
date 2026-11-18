@@ -1,11 +1,12 @@
 // İstatistik screen, variant 2 "Özet". It loads real numbers from repository.stats.* and draws them;
 // every sentence and size is decided in src/features/istatistik/statsLogic.ts (pure, tested).
 
-import { Panel, ProgressTrack } from "../components/ui";
+import { LoadError, Panel, ProgressTrack } from "../components/ui";
 import type { Block } from "../components/ui";
 import { SKILL_BLOCKS, toLocalDay } from "../data";
 import type { SkillBlock } from "../data";
 import { useRepoData } from "../data/react";
+import { useReloadOnWake } from "../features/time/useReloadOnWake";
 import { formatHoursMinutes } from "../features/dinleme/logic/listening";
 import {
   LISTENING_GOAL_HOURS,
@@ -79,7 +80,7 @@ function BarRow({
 }
 
 export function IstatistikScreen() {
-  const { data, error } = useRepoData(async (repo) => {
+  const { data, error, reload } = useRepoData(async (repo) => {
     const today = toLocalDay();
     const range = rangeOfLastDays(today, 30);
     const [settings, days, consistency, listeningTotal, words, bands, success, leeches, speaking] = await Promise.all([
@@ -95,6 +96,9 @@ export function IstatistikScreen() {
     ]);
     return { today, settings, days, consistency, listeningTotal, words, bands, success, leeches, speaking };
   }, []);
+
+  // "Today" and the 30-day range are fixed at load time; refresh them across midnight.
+  useReloadOnWake(reload);
 
   const header = (
     <>
@@ -122,9 +126,7 @@ export function IstatistikScreen() {
     return (
       <section aria-labelledby="istatistik-screen-title" className="flex flex-col gap-3.5">
         {header}
-        <p role="alert" className="text-small text-text">
-          İstatistikler yüklenemedi. Sayfayı yenileyip tekrar dene.
-        </p>
+        <LoadError onRetry={reload} />
       </section>
     );
   }

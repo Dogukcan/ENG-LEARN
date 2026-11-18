@@ -72,7 +72,7 @@ describe("forecastText", () => {
     // 100 minutes left at 25 per day = 4 days -> 21 November.
     const result = forecastText(2900, 50, 25, now);
     expect(result.date).toBe(`21${NBSP}Kasım${NBSP}2026`);
-    expect(result.note).toBe(`Günde ortalama${NBSP}25${NBSP}dk ile 4${NBSP}gün sonra`);
+    expect(result.note).toBe(`4${NBSP}gün sonra`);
   });
 
   it("says the goal is reached", () => {

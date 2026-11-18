@@ -4,6 +4,7 @@ import { Button, LiveRegion, ProgressTrack, Sheet, cx, useReducedMotion } from "
 import { buildPrompt, checkAnswer, repository } from "../../data";
 import type { ReviewGrade, ReviewQueue } from "../../data";
 import { answerLabel } from "./answerLabel";
+import { addHiddenTime, reviewSessionMinutes } from "./reviewMinutes";
 
 export interface ReviewSummary {
   reviewed: number;
@@ -70,6 +71,9 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
   const [message, setMessage] = useState("");
 
   const startedAt = useRef(Date.now());
+  // Time the page spent hidden (app in the background), so it is not counted as study time.
+  const hiddenMs = useRef(0);
+  const hiddenSince = useRef<number | null>(null);
   const historyRef = useRef<ReviewGrade[]>([]);
   const cardRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -81,6 +85,20 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
   useEffect(() => {
     historyRef.current = history;
   }, [history]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      const now = Date.now();
+      if (document.visibilityState === "hidden") {
+        hiddenSince.current = now;
+      } else if (hiddenSince.current !== null) {
+        hiddenMs.current = addHiddenTime(hiddenMs.current, hiddenSince.current, now, startedAt.current);
+        hiddenSince.current = null;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   // Load the queue once, when the session opens. `cancelled` stops a late answer from touching
   // state after the sheet was closed.
@@ -108,7 +126,18 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
       const grades = historyRef.current;
       const reviewed = grades.length;
       const remembered = grades.filter((grade) => grade === "good").length;
-      const minutes = reviewed > 0 ? Math.max(1, Math.round((Date.now() - startedAt.current) / 60000)) : 0;
+      const endedAt = Date.now();
+      // Closing while still hidden (rare) must also drop the current hidden stretch.
+      const hidden =
+        hiddenSince.current === null
+          ? hiddenMs.current
+          : addHiddenTime(hiddenMs.current, hiddenSince.current, endedAt, startedAt.current);
+      const minutes = reviewSessionMinutes({
+        startedAtMs: startedAt.current,
+        endedAtMs: endedAt,
+        hiddenMs: hidden,
+        reviewed,
+      });
       onClose({
         reviewed,
         remembered,

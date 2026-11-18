@@ -2,7 +2,7 @@
 // src/features/bugun/todayLogic.ts (pure, tested) and the look lives in the small components next to it.
 
 import { useState } from "react";
-import { LiveRegion } from "../components/ui";
+import { LiveRegion, LoadError } from "../components/ui";
 import type { Block } from "../components/ui";
 import { SKILL_BLOCKS } from "../data";
 import type { Book, SkillBlock } from "../data";
@@ -17,13 +17,17 @@ import {
   bookLine,
   computeStrip,
   countWorkedDays,
+  dinlemeLine,
   displayMinutes,
   findingLine,
+  konusmaLine,
   lastLocalDays,
   pickNextBlock,
 } from "../features/bugun/todayLogic";
 import type { MinutesByBlock } from "../features/bugun/todayLogic";
+import { pickTargetWords } from "../features/konusma/logic/session";
 import { AccountButton } from "../features/hesap/AccountSheet";
+import { useReloadOnWake } from "../features/time/useReloadOnWake";
 import { useTimer } from "../features/timer/TimerProvider";
 import { ReviewSession } from "../features/review/ReviewSession";
 import { recordReviewMinutes } from "../features/review/recordReview";
@@ -40,17 +44,23 @@ export function BugunScreen() {
 
   // Everything the screen needs, in one load. useRepoData reloads it after any repository write,
   // for example when the timer saves its session, so the numbers update by themselves.
-  const { data } = useRepoData(async (repo) => {
+  const { data, error, reload } = useRepoData(async (repo) => {
     const now = new Date();
     const days = lastLocalDays(now, DAYS_IN_CONSISTENCY_LINE);
-    const [settings, queue, books, perDay] = await Promise.all([
+    const [settings, queue, books, perDay, videos, learning] = await Promise.all([
       repo.settings.get(),
       repo.cards.getReviewQueue(now),
       repo.books.list(),
       Promise.all(days.map((day) => repo.activity.minutesPerBlockForDay(day))),
+      repo.videos.listByStatus("todo"),
+      repo.words.listByStatus("learning"),
     ]);
-    return { settings, queue, books, perDay };
+    return { settings, queue, books, perDay, videos, learning };
   }, []);
+
+  // "Today", the 7-day strip and the due count are computed at load time, so reload when the app wakes
+  // up (an iPhone PWA stays in memory overnight) and every minute.
+  useReloadOnWake(reload);
 
   if (!data) {
     // Nothing to show for the first few milliseconds; the title keeps the layout from jumping.
@@ -59,11 +69,13 @@ export function BugunScreen() {
         <h1 id="bugun-screen-title" className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">
           Bugün
         </h1>
+        {error ? <LoadError onRetry={reload} /> : null}
       </section>
     );
   }
 
-  const { settings, queue, books, perDay } = data;
+  const { settings, queue, books, perDay, videos, learning } = data;
+  const targetWords = pickTargetWords(queue.cards, learning);
   const plan = settings.blockPlanMinutes;
 
   // Today is the last item of `perDay`. The running timer is not saved yet, so its live minutes
@@ -100,8 +112,8 @@ export function BugunScreen() {
   const sub: Record<SkillBlock, string> = {
     okuma: okumaLine,
     kelime: `${queue.dueTotal}${NBSP}kart · ${queue.newToday}${NBSP}yeni kart`,
-    dinleme: "Sıradaki video yok",
-    konusma: "Bugün okuduğunu anlat",
+    dinleme: dinlemeLine(videos),
+    konusma: konusmaLine(targetWords.length),
   };
 
   const heroKpi =
@@ -117,6 +129,8 @@ export function BugunScreen() {
     remainingMinutes: remaining(block),
     book: block === "okuma" && activeBook ? { shortName: activeBook.shortName, title: activeBook.title } : undefined,
     dueCards: block === "kelime" ? queue.dueTotal : undefined,
+    videoMinutes: block === "dinleme" ? videos[0]?.durationMinutes : undefined,
+    targetWords: block === "konusma" ? targetWords.length : undefined,
   }));
 
   // A failed save leaves the timer running (see TimerProvider), so we only need to tell the user.
