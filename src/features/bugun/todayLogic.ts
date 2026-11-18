@@ -28,6 +28,16 @@ export function displayMinutes(minutes: number): number {
 }
 
 /**
+ * Whole minutes to show for the review queue estimate. The estimate is cards x seconds per card,
+ * so 1 card at 20 s is 0.33 min. It is rounded UP, and a non-empty queue shows at least 1 minute.
+ * An empty queue shows 0.
+ */
+export function reviewMinutes(cardCount: number, estimatedMinutes: number): number {
+  if (cardCount <= 0) return 0;
+  return Math.max(1, Math.ceil(estimatedMinutes));
+}
+
+/**
  * Which block comes next (the hero card).
  * Rule from draft D: Kelime first while cards are due and its plan is not met (due cards lose
  * value the longer they wait). Otherwise the first block in the usual order that is below its

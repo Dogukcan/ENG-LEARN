@@ -23,6 +23,7 @@ import {
   konusmaLine,
   lastLocalDays,
   pickNextBlock,
+  reviewMinutes,
 } from "../features/bugun/todayLogic";
 import type { MinutesByBlock } from "../features/bugun/todayLogic";
 import { pickTargetWords } from "../features/konusma/logic/session";
@@ -120,7 +121,7 @@ export function BugunScreen() {
     next === "kelime" ? `${queue.dueTotal}${NBSP}kart` : `${remaining(next)}${NBSP}dk kaldı`;
   const heroMeta =
     next === "kelime"
-      ? `tahmini ${queue.estimatedMinutes}${NBSP}dk · ${queue.newToday}${NBSP}yeni kart`
+      ? `tahmini ${reviewMinutes(queue.cards.length, queue.estimatedMinutes)}${NBSP}dk · ${queue.newToday}${NBSP}yeni kart`
       : sub[next];
 
   const rows: SonraRow[] = SKILL_BLOCKS.filter((block) => block !== next).map((block) => ({

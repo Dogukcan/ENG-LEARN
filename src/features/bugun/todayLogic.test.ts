@@ -9,6 +9,7 @@ import {
   findingLine,
   lastLocalDays,
   pickNextBlock,
+  reviewMinutes,
 } from "./todayLogic";
 import type { MinutesByBlock } from "./todayLogic";
 
@@ -107,6 +108,20 @@ describe("displayMinutes", () => {
     expect(displayMinutes(0.4)).toBe(0);
     expect(displayMinutes(1.5)).toBe(2);
     expect(displayMinutes(-3)).toBe(0);
+  });
+});
+
+describe("reviewMinutes", () => {
+  it("shows 0 when the queue is empty", () => {
+    expect(reviewMinutes(0, 0)).toBe(0);
+  });
+  it("shows at least 1 minute for one card (0.33 min rounds up)", () => {
+    expect(reviewMinutes(1, 20 / 60)).toBe(1);
+  });
+  it("rounds the estimate up to whole minutes", () => {
+    expect(reviewMinutes(3, 1)).toBe(1);
+    expect(reviewMinutes(4, 80 / 60)).toBe(2);
+    expect(reviewMinutes(45, 15)).toBe(15);
   });
 });
 

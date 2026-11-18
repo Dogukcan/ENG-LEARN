@@ -1,5 +1,6 @@
 import { Button, DisabledReason, Panel } from "../../components/ui/index.ts";
 import type { ReviewQueue } from "../../data";
+import { reviewMinutes } from "../bugun/todayLogic.ts";
 
 export interface ReviewRowProps {
   queue: ReviewQueue;
@@ -16,7 +17,7 @@ export function ReviewRow({ queue, onStart }: ReviewRowProps) {
       <div className="flex min-h-[48px] items-center justify-between gap-3">
         <span className="text-small leading-[1.35] font-semibold text-text">
           {queue.dueTotal}
-          {NBSP}kart · tahmini {queue.estimatedMinutes}
+          {NBSP}kart · tahmini {reviewMinutes(queue.cards.length, queue.estimatedMinutes)}
           {NBSP}dk
         </span>
         <Button
