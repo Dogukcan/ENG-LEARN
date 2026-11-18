@@ -3,12 +3,15 @@ import type { MutableRefObject, SyntheticEvent } from "react";
 import { Button, LiveRegion, ProgressTrack, Sheet, cx, useReducedMotion } from "../../components/ui";
 import { buildPrompt, checkAnswer, repository } from "../../data";
 import type { ReviewGrade, ReviewQueue } from "../../data";
+import { answerLabel } from "./answerLabel";
 
 export interface ReviewSummary {
   reviewed: number;
   remembered: number;
   forgotten: number;
   minutes: number;
+  /** ISO time the session opened, for the activity log. */
+  startedAt: string;
 }
 
 export interface ReviewSessionProps {
@@ -106,7 +109,13 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
       const reviewed = grades.length;
       const remembered = grades.filter((grade) => grade === "good").length;
       const minutes = reviewed > 0 ? Math.max(1, Math.round((Date.now() - startedAt.current) / 60000)) : 0;
-      onClose({ reviewed, remembered, forgotten: reviewed - remembered, minutes });
+      onClose({
+        reviewed,
+        remembered,
+        forgotten: reviewed - remembered,
+        minutes,
+        startedAt: new Date(startedAt.current).toISOString(),
+      });
     };
   }, [endRef, onClose]);
 
@@ -349,7 +358,7 @@ function SessionBody({ endRef, onClose }: SessionBodyProps) {
           >
             {correct !== null && prompt.kind !== "recall" ? (
               <p className="text-body font-semibold leading-[1.3]">
-                {correct ? `Doğru: ${prompt.answer}` : `Doğru cevap: ${prompt.answer}`}
+                {correct ? `Doğru: ${prompt.answer}` : `Doğru cevap: ${answerLabel(prompt)}`}
               </p>
             ) : null}
           </div>

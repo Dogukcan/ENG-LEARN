@@ -25,6 +25,7 @@ import {
 import type { MinutesByBlock } from "../features/bugun/todayLogic";
 import { useTimer } from "../features/timer/TimerProvider";
 import { ReviewSession } from "../features/review/ReviewSession";
+import { recordReviewMinutes } from "../features/review/recordReview";
 
 const DAYS_IN_CONSISTENCY_LINE = 7;
 
@@ -169,16 +170,29 @@ export function BugunScreen() {
 
       <SonraList rows={rows} runningBlock={timer.running} runningSeconds={timer.elapsedSeconds} onPress={press} />
 
-      {/* Plain text for now; it becomes a button to İstatistik later. */}
-      <p className="flex min-h-11 items-center text-small text-muted">
+      {/* Setting the hash is enough: until the İstatistik screen exists the app falls back to Bugün. */}
+      <button
+        type="button"
+        onClick={() => {
+          window.location.hash = "#/istatistik";
+        }}
+        className="flex min-h-11 items-center self-start text-left text-small text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text"
+      >
         Son {DAYS_IN_CONSISTENCY_LINE}
         {NBSP}günde {workedDays}
-        {NBSP}gün çalıştın
-      </p>
+        {NBSP}gün çalıştın{NBSP}›
+      </button>
 
-      <LiveRegion>{message}</LiveRegion>
+      <LiveRegion visible>{message || (timer.capped ? "Sayaç 3 saati geçti; 180 dk kaydedildi." : "")}</LiveRegion>
 
-      <ReviewSession open={reviewOpen} onClose={() => setReviewOpen(false)} />
+      <ReviewSession
+        open={reviewOpen}
+        onClose={(summary) => {
+          setReviewOpen(false);
+          // The write makes useRepoData reload, so the strip and the next-block rule move on.
+          recordReviewMinutes(summary).catch(() => setMessage("Süre kaydedilemedi. Tekrar dene."));
+        }}
+      />
     </section>
   );
 }

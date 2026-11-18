@@ -10,7 +10,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { repository } from "../../data";
 import type { SkillBlock } from "../../data";
-import { elapsedSecondsSince, parsePersistedTimer, secondsToRecord } from "./timerMath";
+import { elapsedSecondsSince, exceedsTimerCap, parsePersistedTimer, secondsToRecord } from "./timerMath";
 import type { PersistedTimer } from "./timerMath";
 
 const STORAGE_KEY = "eng-learn:running-timer";
@@ -20,6 +20,8 @@ export interface TimerApi {
   running: SkillBlock | null;
   /** Seconds since the timer started; 0 when nothing runs. Updates once per second. */
   elapsedSeconds: number;
+  /** True after the last stop was cut to 180 minutes; cleared when a timer starts again. */
+  capped: boolean;
   start(block: SkillBlock): Promise<void>;
   stop(): Promise<void>;
   /** Stop if this block is running, otherwise start it (stopping any other block first). */
@@ -51,6 +53,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   // flash of "not running" after a reload.
   const [current, setCurrent] = useState<PersistedTimer | null>(readStored);
   const [now, setNow] = useState(() => Date.now());
+  const [capped, setCapped] = useState(false);
 
   // The ref is the truth for the actions: two quick taps must not both see a stale `current`
   // from the same render and write the same session twice.
@@ -80,8 +83,10 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     if (!stopped) return;
     // Clear first (synchronously), write second: a second stop() call finds nothing to stop.
     setTimer(null);
-    const seconds = secondsToRecord(elapsedSecondsSince(stopped.startedAt, Date.now()));
+    const elapsed = elapsedSecondsSince(stopped.startedAt, Date.now());
+    const seconds = secondsToRecord(elapsed);
     if (seconds === 0) return;
+    setCapped(exceedsTimerCap(elapsed));
     try {
       await repository.activity.add({
         block: stopped.block,
@@ -101,6 +106,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       if (currentRef.current?.block === block) return;
       if (currentRef.current) await stop();
       setNow(Date.now());
+      setCapped(false);
       setTimer({ block, startedAt: new Date().toISOString() });
     },
     [stop, setTimer],
@@ -118,11 +124,12 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     () => ({
       running: current ? current.block : null,
       elapsedSeconds: current ? elapsedSecondsSince(current.startedAt, now) : 0,
+      capped,
       start,
       stop,
       toggle,
     }),
-    [current, now, start, stop, toggle],
+    [current, now, capped, start, stop, toggle],
   );
 
   return <TimerContext.Provider value={value}>{children}</TimerContext.Provider>;

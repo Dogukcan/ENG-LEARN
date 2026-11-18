@@ -23,14 +23,26 @@ export function elapsedSecondsSince(startedAt: string, nowMs: number): number {
 }
 
 /**
+ * Longest session we record: 3 hours. Why: a timer forgotten on overnight would otherwise write
+ * 600 "study" minutes and ruin the weekly numbers. The learner is told when the cap was applied.
+ */
+export const MAX_TIMER_SECONDS = 180 * 60;
+
+/** True when the timer ran longer than the cap, so only part of it will be recorded. */
+export function exceedsTimerCap(elapsedSeconds: number): boolean {
+  return elapsedSeconds > MAX_TIMER_SECONDS;
+}
+
+/**
  * How many seconds to write to the activity log when the timer stops.
  * - 0 seconds run: nothing is written (returns 0).
  * - Anything more: rounded to whole minutes, at least 1 minute, returned in seconds.
+ * - Never more than MAX_TIMER_SECONDS (180 minutes).
  * Why a minimum of one minute: a very short session still counts as "I did it today".
  */
 export function secondsToRecord(elapsedSeconds: number): number {
   if (!(elapsedSeconds > 0)) return 0;
-  const minutes = Math.max(1, Math.round(elapsedSeconds / 60));
+  const minutes = Math.max(1, Math.round(Math.min(elapsedSeconds, MAX_TIMER_SECONDS) / 60));
   return minutes * 60;
 }
 

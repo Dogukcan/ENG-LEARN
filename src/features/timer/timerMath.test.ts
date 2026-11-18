@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { elapsedSecondsSince, formatMMSS, parsePersistedTimer, secondsToRecord } from "./timerMath";
+import {
+  MAX_TIMER_SECONDS,
+  elapsedSecondsSince,
+  exceedsTimerCap,
+  formatMMSS,
+  parsePersistedTimer,
+  secondsToRecord,
+} from "./timerMath";
 
 describe("secondsToRecord", () => {
   it("records nothing for 0 seconds", () => {
@@ -17,6 +24,22 @@ describe("secondsToRecord", () => {
   });
   it("ignores negative input", () => {
     expect(secondsToRecord(-5)).toBe(0);
+  });
+});
+
+describe("timer cap", () => {
+  it("records at most 180 minutes", () => {
+    expect(MAX_TIMER_SECONDS).toBe(10_800);
+    expect(secondsToRecord(3 * 3600 + 1)).toBe(10_800);
+    expect(secondsToRecord(10 * 3600)).toBe(10_800);
+  });
+  it("records exactly 180 minutes at the cap and keeps normal values below it", () => {
+    expect(secondsToRecord(10_800)).toBe(10_800);
+    expect(secondsToRecord(179 * 60)).toBe(179 * 60);
+  });
+  it("flags only sessions longer than the cap", () => {
+    expect(exceedsTimerCap(10_800)).toBe(false);
+    expect(exceedsTimerCap(10_801)).toBe(true);
   });
 });
 

@@ -5,6 +5,7 @@ import { AddWordForm } from "../features/kelime/AddWordForm.tsx";
 import { InboxTriage } from "../features/kelime/InboxTriage.tsx";
 import { ReviewRow } from "../features/kelime/ReviewRow.tsx";
 import { ReviewSession } from "../features/review/ReviewSession.tsx";
+import { recordReviewMinutes } from "../features/review/recordReview.ts";
 
 /**
  * Kelime screen, variant 2 "Tek tek" (chosen as the default in design/ui-freeze.md).
@@ -42,17 +43,11 @@ export function KelimeScreen() {
     };
   }, [reload]);
 
-  // Why a fallback: when the inbox was empty, the "Kelime ekle" button that opened the sheet disappears
-  // after the first save, so the Sheet cannot return focus to it and focus would fall to <body>.
-  // Sheet.tsx is owned elsewhere, so the screen moves focus to the header "+" button itself.
+  // Why returnFocusTo: when the inbox was empty, the "Kelime ekle" button that opened the sheet
+  // disappears after the first save, so the Sheet cannot return focus to it. It falls back to the
+  // header "+" button instead of letting focus drop to <body>.
   const addButtonRef = useRef<HTMLButtonElement>(null);
-  function closeAdd() {
-    setAddOpen(false);
-    window.setTimeout(() => {
-      const active = document.activeElement;
-      if (!active || active === document.body) addButtonRef.current?.focus();
-    }, 0);
-  }
+  const closeAdd = () => setAddOpen(false);
 
   return (
     <section aria-labelledby="kelime-screen-title" className="flex flex-col gap-3.5">
@@ -97,7 +92,13 @@ export function KelimeScreen() {
         </p>
       )}
 
-      <Sheet variant="fullscreen" open={addOpen} onClose={closeAdd} aria-label="Kelime ekle">
+      <Sheet
+        variant="fullscreen"
+        open={addOpen}
+        onClose={closeAdd}
+        aria-label="Kelime ekle"
+        returnFocusTo={() => addButtonRef.current}
+      >
         <AddWordForm onClose={closeAdd} onAdded={() => setAddedCount((count) => count + 1)} />
       </Sheet>
 
@@ -106,6 +107,8 @@ export function KelimeScreen() {
         onClose={(summary) => {
           setReviewOpen(false);
           if (summary.reviewed > 0) {
+            // The write triggers useRepoData's reload, so Bugün's numbers and this screen update.
+            recordReviewMinutes(summary).catch(() => setReviewMessage("Süre kaydedilemedi."));
             setReviewMessage(
               `Oturum bitti: ${summary.reviewed} kart · ${summary.remembered} hatırladın · ${summary.forgotten} tekrar gelecek`,
             );
