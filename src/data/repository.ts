@@ -24,6 +24,13 @@ import type {
   ReviewLog,
   Settings,
   SkillBlock,
+  SpeakingError,
+  SpeakingReport,
+  SpeakingSession,
+  Video,
+  VideoLevel,
+  VideoStatus,
+  VideoUnderstanding,
   Word,
   WordStatus,
 } from "./types";
@@ -43,7 +50,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
 // ---------- Input and result types ----------
 
 /** A book to create or replace. Leave out `id` to create a new book with a fresh id. */
-export type BookInput = Omit<Book, "id"> & { id?: string };
+export type BookInput = Omit<Book, "id" | "updatedAt" | "deletedAt"> & { id?: string };
 
 /** Where the user is in a book. Both numbers are 1-based whole numbers. */
 export interface BookPosition {
@@ -129,6 +136,124 @@ export type SettingsPatch = Partial<Omit<Settings, "blockPlanMinutes">> & {
   blockPlanMinutes?: Partial<Record<SkillBlock, number>>;
 };
 
+/** What the video form sends. The repository sets the id, status and dates. */
+export interface NewVideo {
+  youtubeId: string;
+  title: string;
+  channel: string;
+  level: VideoLevel;
+  /** Whole minutes, at least 1. */
+  durationMinutes: number;
+}
+
+/** "duplicate": a live video with the same YouTube id is already in the list. */
+export type AddVideoResult =
+  | { ok: true; video: Video }
+  | { ok: false; reason: "duplicate" };
+
+export type MarkWatchedResult =
+  | { ok: true; video: Video }
+  | { ok: false; reason: "not-found" | "already-watched" };
+
+export type UndoWatchedResult =
+  | { ok: true; video: Video }
+  | { ok: false; reason: "not-found" | "not-watched" };
+
+/** The start of a speaking session, as the screen knows it. */
+export interface NewSpeakingSession {
+  scenarioId: string;
+  /** Any string `new Date()` understands; stored as a UTC ISO string. */
+  startedAt: string;
+}
+
+/** What `saveReport` did. New words that were already known to the app are counted as skipped. */
+export interface SaveReportResult {
+  ok: true;
+  session: SpeakingSession;
+  errorsSaved: number;
+  wordsAdded: number;
+  wordsSkipped: number;
+}
+
+/** An inclusive range of local days, e.g. { from: "2026-11-11", to: "2026-11-17" }. */
+export interface DayRange {
+  from: LocalDay;
+  to: LocalDay;
+}
+
+// ---------- Statistics results ----------
+
+export interface DayMinutes {
+  day: LocalDay;
+  minutes: Record<SkillBlock, number>;
+}
+
+/** Days that reached the daily minimum (settings.dailyMinimumMinutes), out of 7 and out of 30. */
+export interface Consistency {
+  last7: number;
+  last30: number;
+}
+
+/** NGSL frequency bands. "listede yok" = not on the NGSL list at all. */
+export type NgslBand = "1-1000" | "1001-2000" | "2001-2809" | "listede yok";
+export const NGSL_BANDS: readonly NgslBand[] = ["1-1000", "1001-2000", "2001-2809", "listede yok"];
+
+export interface ReviewSuccess {
+  good: number;
+  total: number;
+  /** good / total, or null when there were no reviews (so the UI shows "-", not "0%"). */
+  rate: number | null;
+}
+
+export interface CategoryWeeks {
+  thisWeek: number;
+  lastWeek: number;
+}
+
+// ---------- Sync (used by the sync engine, not by screens) ----------
+
+/** Every store that is synced. The names are the IndexedDB store names. */
+export const SYNC_STORES = [
+  "books",
+  "inbox",
+  "words",
+  "cards",
+  "reviewLogs",
+  "activity",
+  "settings",
+  "videos",
+  "speakingSessions",
+  "speakingErrors",
+] as const;
+export type SyncStore = (typeof SYNC_STORES)[number];
+
+/**
+ * A record as the sync engine sees it: the public fields plus `updatedAt` and `deletedAt`.
+ * Hidden storage helper fields (like the duplicate-check key) are never included.
+ * The settings row has the fixed id "app" (this is a single-user app).
+ */
+export interface SyncRow {
+  id: string;
+  updatedAt: string;
+  deletedAt?: string;
+  [field: string]: unknown;
+}
+
+/**
+ * What `applyRemote` did with the rows it received.
+ * - applied: written locally.
+ * - skipped: the local copy was as new or newer (last write wins), or the row was an old tombstone.
+ * - conflicts: a different record already owns the same unique key (same word, same video, same
+ *   card word); the newer one won. A conflict is also counted in `applied` or `skipped`.
+ * - invalid: the row did not have the shape of that store, so it was ignored.
+ */
+export interface ApplyRemoteResult {
+  applied: number;
+  skipped: number;
+  conflicts: number;
+  invalid: number;
+}
+
 // ---------- The interface ----------
 
 export interface Repository {
@@ -194,6 +319,67 @@ export interface Repository {
     get(): Promise<Settings>;
     /** Change some settings and return the full result. */
     update(patch: SettingsPatch): Promise<Settings>;
+  };
+  videos: {
+    /** Add a video to the list. A live video with the same YouTube id is a typed failure. */
+    add(input: NewVideo): Promise<AddVideoResult>;
+    /**
+     * Videos with the given status. "todo": oldest first (a queue). "watched": most recently
+     * watched first.
+     */
+    listByStatus(status: VideoStatus): Promise<Video[]>;
+    /**
+     * Mark a video as watched and, in the SAME transaction, log its minutes as "dinleme"
+     * activity (source "manual"), so the video and the minutes can never disagree.
+     */
+    markWatched(id: string, understanding?: VideoUnderstanding, now?: Date): Promise<MarkWatchedResult>;
+    /** Take back `markWatched`: the video is "todo" again and its activity log is removed. */
+    undoWatched(id: string): Promise<UndoWatchedResult>;
+    /** Remove a video from the list. Returns it, or undefined if the id is unknown. */
+    remove(id: string): Promise<Video | undefined>;
+  };
+  speaking: {
+    /**
+     * Store a finished session and its errors in one transaction, and add the report's new words
+     * to the inbox with source `{ kind: "konusma" }`. Words that are blank, already in the inbox
+     * or already being learned are skipped (counted in `wordsSkipped`).
+     */
+    saveReport(session: NewSpeakingSession, report: SpeakingReport): Promise<SaveReportResult>;
+    /** Errors of sessions that started inside the range, counted per category. */
+    errorsPerCategory(range: DayRange): Promise<Record<string, number>>;
+    /** The errors of one session (no promised order). */
+    listErrors(sessionId: string): Promise<SpeakingError[]>;
+  };
+  /** Read-only numbers for the İstatistik screen. `today` is a parameter so tests control the clock. */
+  stats: {
+    /** Minutes per block for every local day in the range (days without activity are all zero). */
+    minutesPerBlockPerDay(range: DayRange): Promise<DayMinutes[]>;
+    /** How many of the last 7 and last 30 local days (today included) reached the daily minimum. */
+    consistency(today?: LocalDay): Promise<Consistency>;
+    /** All "dinleme" minutes ever logged, rounded down to whole minutes (same rule as the Dinleme screen). */
+    totalListeningMinutes(): Promise<number>;
+    /** How many words have each status. */
+    wordCounts(): Promise<Record<WordStatus, number>>;
+    /** Known words per NGSL band, using the NGSL rank of the lemma. */
+    knownWordsPerNgslBand(): Promise<Record<NgslBand, number>>;
+    /** Share of "good" answers in the last 7 local days (today included). */
+    reviewSuccessRate(today?: LocalDay): Promise<ReviewSuccess>;
+    /** Number of leech cards. */
+    leechCount(): Promise<number>;
+    /** Speaking errors per category: the last 7 local days versus the 7 days before. */
+    speakingErrorsWeekOverWeek(today?: LocalDay): Promise<Record<string, CategoryWeeks>>;
+  };
+  /** The sync engine's door. It does not notify subscribers when it only READS. */
+  sync: {
+    /** Rows of a store whose `updatedAt` is after `isoTime`, deleted rows included, oldest first. */
+    listChangedSince(store: SyncStore, isoTime: string): Promise<SyncRow[]>;
+    /**
+     * Merge rows received from the server. Last write wins on `updatedAt`: a remote row replaces
+     * the local one only when it is strictly newer. Remote `updatedAt` values are kept as they
+     * are (they are not bumped), so applying remote rows never creates a "local change" to push
+     * back. Unique keys (word, video, card per word) are respected: see `ApplyRemoteResult`.
+     */
+    applyRemote(store: SyncStore, rows: unknown[]): Promise<ApplyRemoteResult>;
   };
 }
 

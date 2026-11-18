@@ -8,20 +8,42 @@ import type { Repository } from "./repository";
 export type * from "./types";
 export type {
   AddInboxResult,
+  AddVideoResult,
+  ApplyRemoteResult,
   BookInput,
   BookPosition,
+  CategoryWeeks,
+  Consistency,
+  DayMinutes,
+  DayRange,
+  MarkWatchedResult,
   NewActivityLog,
   NewInboxItem,
+  NewSpeakingSession,
+  NewVideo,
+  NgslBand,
   Repository,
   ReviewQueue,
   ReviewQueueOptions,
   ReviewResult,
+  ReviewSuccess,
+  SaveReportResult,
   SettingsPatch,
+  SyncRow,
+  SyncStore,
   TriageResult,
   UndoResult,
+  UndoWatchedResult,
 } from "./repository";
-export { DEFAULT_SETTINGS, SKILL_BLOCKS, applySettingsPatch, normalizeWord } from "./repository";
-export { localDayRange, toLocalDay, type LocalDay } from "./localDay";
+export {
+  DEFAULT_SETTINGS,
+  NGSL_BANDS,
+  SKILL_BLOCKS,
+  SYNC_STORES,
+  applySettingsPatch,
+  normalizeWord,
+} from "./repository";
+export { addLocalDays, listLocalDays, localDayRange, toLocalDay, type LocalDay } from "./localDay";
 export { createIndexedDbRepository } from "./indexeddb";
 export { buildPrompt, checkAnswer, type Prompt, type PromptWord } from "./srs/prompt";
 

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { Book, InboxItem } from "../../data";
 import { bookSourceLine, capturedToday, doneMinutes, formatClock, stepValue, titleProgress } from "./logic";
 
-const books: Book[] = [{ id: "b1", title: "Reader at Work 1", shortName: "RW1", unit: 3, page: 42 }];
+const books: Book[] = [
+  { id: "b1", title: "Reader at Work 1", shortName: "RW1", unit: 3, page: 42, updatedAt: "2026-11-17T12:00:00.000Z" },
+];
 
 function item(id: string, createdAt: string, source: InboxItem["source"], sentence?: string): InboxItem {
-  return { id, word: id, createdAt, source, ...(sentence ? { sentence } : {}) };
+  return { id, word: id, createdAt, updatedAt: createdAt, source, ...(sentence ? { sentence } : {}) };
 }
 
 describe("stepValue", () => {

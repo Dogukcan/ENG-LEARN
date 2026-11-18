@@ -11,6 +11,10 @@
 //   "2026-11-17T07:30:00.000Z"). These strings sort in time order, which lets IndexedDB use
 //   them as index keys for range queries ("everything that started today").
 // - FSRS (spaced repetition) data lives in `Card` and `ReviewLog` below, added in Faz 2.
+// - Sync fields (v4): EVERY record has `updatedAt` (ISO, set on every write) and an optional
+//   `deletedAt`. Sync compares `updatedAt` to decide which copy of a record is newer (last write
+//   wins). Deleting only sets `deletedAt` (a "soft delete"): the row stays, so another device can
+//   learn about the deletion. Normal list/get methods never return soft-deleted rows.
 
 /** The four daily skill blocks. Turkish names because they are the user's own words in the UI. */
 export type SkillBlock = "okuma" | "kelime" | "dinleme" | "konusma";
@@ -25,6 +29,10 @@ export interface Book {
   unit: number;
   /** Current page (1-based). */
   page: number;
+  /** Last write time (ISO). Used by sync, see the file header. */
+  updatedAt: string;
+  /** Set when the book was deleted on another device. Never set by normal app use. */
+  deletedAt?: string;
 }
 
 /**
@@ -57,6 +65,10 @@ export interface InboxItem {
    * known before" and so the existing Word is updated instead of duplicated.
    */
   previousStatus?: "known" | "ignored";
+  /** Last write time (ISO). Used by sync. */
+  updatedAt: string;
+  /** Soft delete mark: an inbox item that was sorted or removed keeps its row for sync. */
+  deletedAt?: string;
 }
 
 /** What the user decided about a word during triage. */
@@ -74,6 +86,7 @@ export interface Word {
   source: CaptureSource;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
 }
 
 /** How a block of practice time was recorded. */
@@ -88,6 +101,8 @@ export interface ActivityLog {
   /** Length in whole seconds. Seconds (not minutes) so short timer sessions are not lost. */
   seconds: number;
   source: ActivitySource;
+  updatedAt: string;
+  deletedAt?: string;
 }
 
 /** User preferences. Defaults live in `DEFAULT_SETTINGS` (repository.ts). */
@@ -152,6 +167,8 @@ export interface Card {
   /** True once `lapses` reaches the leech threshold: a word that keeps being forgotten. */
   leech: boolean;
   createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
 }
 
 /** The two grade buttons: "Unuttum" = again, "Hatırladım" = good. */
@@ -190,4 +207,69 @@ export interface ReviewLog {
   revlog: FsrsRevlog;
   /** The card exactly as it was before this review. */
   previousCard: Card;
+  /** Set when the log is written. A soft-deleted log (undo) keeps its row so sync can push it. */
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+// ---------- Listening videos (Faz 4, v4) ----------
+
+/** How hard the video feels. Turkish words because they are shown in the UI as they are. */
+export type VideoLevel = "kolay" | "orta" | "zor";
+export type VideoStatus = "todo" | "watched";
+/** How much of the video the user understood: little, about half, most. */
+export type VideoUnderstanding = "az" | "yarisi" | "cogu";
+
+/** A YouTube video in the listening list. The app stores only the link data, never the video. */
+export interface Video {
+  id: string;
+  /** The 11-character YouTube id. Unique among live videos. */
+  youtubeId: string;
+  title: string;
+  channel: string;
+  level: VideoLevel;
+  durationMinutes: number;
+  status: VideoStatus;
+  watchedAt?: string;
+  understanding?: VideoUnderstanding;
+  /** The activity log written by `markWatched`; `undoWatched` removes exactly that log. */
+  activityId?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+// ---------- Speaking sessions (Faz 4, v4) ----------
+
+/** The JSON report the external AI returns after a speaking session (see konusma/reportSchema). */
+export interface SpeakingReport {
+  errors: Array<{ original: string; corrected: string; category: string; note?: string }>;
+  betterPhrases: Array<{ original: string; better: string }>;
+  newWords: Array<{ word: string; sentence?: string; meaningTr?: string }>;
+  summary?: string;
+}
+
+export interface SpeakingSession {
+  id: string;
+  scenarioId: string;
+  startedAt: string;
+  /** The whole parsed report, kept as JSON so nothing the AI said is lost. */
+  rawReport: SpeakingReport;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/** One mistake from a session report, stored on its own so it can be counted per category. */
+export interface SpeakingError {
+  id: string;
+  sessionId: string;
+  /** Category id from the report, e.g. "article". A plain string: the database does not limit it. */
+  category: string;
+  original: string;
+  corrected: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
 }

@@ -111,6 +111,7 @@ export function createNewCardWith(scheduler: FsrsScheduler, wordId: string, now:
     learningStep: fresh.learningStep,
     leech: false,
     createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
   };
 }
 
@@ -169,6 +170,7 @@ export function gradeCardWith(
       learningStep: out.learningStep,
       leech: card.leech || lapses >= LEECH_THRESHOLD,
       createdAt: card.createdAt,
+      updatedAt: now.toISOString(),
     },
     revlog: {
       rating: revlog.rating,

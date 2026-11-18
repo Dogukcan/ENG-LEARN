@@ -104,16 +104,20 @@ describe("database upgrade", () => {
     v1.close();
 
     const repo = createIndexedDbRepository(name);
-    expect(await repo.books.list()).toEqual([book]);
+    // v4 gave the old book an updatedAt; everything else is unchanged.
+    expect(await repo.books.list()).toEqual([{ ...book, updatedAt: expect.any(String) }]);
     expect((await repo.inbox.list()).map((i) => i.word)).toEqual(["Anchor"]);
     expect((await repo.words.listByStatus("known")).map((w) => w.lemma)).toEqual(["harbor"]);
     // The new stores exist and work.
     expect((await repo.cards.getReviewQueue(NOW)).dueTotal).toBe(0);
 
     const raw = await openDB(name);
-    expect(raw.version).toBe(3);
+    expect(raw.version).toBe(4);
     expect([...raw.objectStoreNames].sort()).toEqual(
-      ["activity", "books", "cards", "inbox", "reviewLogs", "settings", "words"].sort(),
+      [
+        "activity", "books", "cards", "inbox", "reviewLogs", "settings", "words",
+        "videos", "speakingSessions", "speakingErrors",
+      ].sort(),
     );
     raw.close();
   });
@@ -486,11 +490,17 @@ describe("undoLastReview", () => {
     await repo.cards.reviewCard(before.id, "good", NOW);
 
     const undone = await repo.cards.undoLastReview();
-    expect(undone).toEqual({ ok: true, card: before });
+    // Same memory state as before the review; only updatedAt is newer (so sync sees the undo).
+    const restored = { ...before, updatedAt: expect.any(String) };
+    expect(undone).toEqual({ ok: true, card: restored });
+    expect(undone.ok && undone.card.updatedAt > before.updatedAt).toBe(true);
 
-    expect(await firstCard(repo)).toEqual(before);
+    expect(await firstCard(repo)).toEqual(restored);
+    // The log is soft deleted: its row stays (marked) so a later sync can push the deletion.
     const raw = await openDB(name);
-    expect(await raw.count("reviewLogs")).toBe(0);
+    const logs = await raw.getAll("reviewLogs");
+    expect(logs).toHaveLength(1);
+    expect(logs[0].deletedAt).toEqual(expect.any(String));
     raw.close();
     expect(await repo.cards.undoLastReview()).toEqual({ ok: false, reason: "nothing-to-undo" });
   });
@@ -516,7 +526,7 @@ describe("undoLastReview", () => {
     expect((await repo.cards.listLeeches()).length).toBe(1);
 
     const undone = await repo.cards.undoLastReview();
-    expect(undone).toEqual({ ok: true, card: beforeLast });
+    expect(undone).toEqual({ ok: true, card: { ...beforeLast, updatedAt: expect.any(String) } });
     expect(await repo.cards.listLeeches()).toEqual([]);
   });
 });
@@ -562,7 +572,7 @@ describe("database upgrade to version 3 (normalized keys)", () => {
     const repo = createIndexedDbRepository(name);
     await repo.books.list();
     const raw = await openDB(name);
-    expect(raw.version).toBe(3);
+    expect(raw.version).toBe(4);
     const keys = Object.fromEntries((await raw.getAll("words")).map((w) => [w.id, w.normalized]));
     // w2 already held the canonical key, so it keeps it; w1 (older) cannot take it and keeps its old key.
     expect(keys.w2).toBe("don't");

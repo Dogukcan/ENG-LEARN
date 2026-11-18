@@ -50,3 +50,23 @@ export function localDayRange(day: LocalDay): { start: string; end: string } {
   }
   return { start: start.toISOString(), end: end.toISOString() };
 }
+
+/**
+ * The local day `offset` days after `day` (negative = before). Uses calendar arithmetic
+ * (`new Date(y, m, d + n)`), not "+24 hours", so it stays right across daylight-saving changes.
+ */
+export function addLocalDays(day: LocalDay, offset: number): LocalDay {
+  localDayRange(day); // validates the format and throws RangeError for bad input
+  const [year, month, dayOfMonth] = day.split("-").map(Number) as [number, number, number];
+  return toLocalDay(new Date(year, month - 1, dayOfMonth + offset));
+}
+
+/** Every local day from `from` to `to`, both included, oldest first. Empty when `to` < `from`. */
+export function listLocalDays(from: LocalDay, to: LocalDay): LocalDay[] {
+  localDayRange(from);
+  localDayRange(to);
+  const days: LocalDay[] = [];
+  // Day strings sort like dates, so a plain string compare is enough for the loop condition.
+  for (let day = from; day <= to; day = addLocalDays(day, 1)) days.push(day);
+  return days;
+}

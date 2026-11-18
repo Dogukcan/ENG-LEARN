@@ -6,7 +6,14 @@ import { formatHoursMinutes, paceMinutesPerDay, projectGoalDate, totalListeningM
 let counter = 0;
 function log(block: ActivityLog["block"], when: Date, minutes: number): ActivityLog {
   counter += 1;
-  return { id: `l${counter}`, block, startedAt: when.toISOString(), seconds: Math.round(minutes * 60), source: "manual" };
+  return {
+    id: `l${counter}`,
+    block,
+    startedAt: when.toISOString(),
+    updatedAt: when.toISOString(),
+    seconds: Math.round(minutes * 60),
+    source: "manual",
+  };
 }
 
 describe("totalListeningMinutes", () => {

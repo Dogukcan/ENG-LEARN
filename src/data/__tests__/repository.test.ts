@@ -51,7 +51,9 @@ describe("books", () => {
     if (!rw1) throw new Error("seed missing");
 
     const updated = await repo.books.setPosition(rw1.id, { unit: 3, page: 42 });
-    expect(updated).toEqual({ ...rw1, unit: 3, page: 42 });
+    // Every write moves updatedAt forward (sync uses it), so only the time differs from rw1.
+    expect(updated).toEqual({ ...rw1, unit: 3, page: 42, updatedAt: expect.any(String) });
+    expect(updated?.updatedAt && updated.updatedAt > rw1.updatedAt).toBe(true);
     expect(await repo.books.get(rw1.id)).toEqual(updated);
     expect(await repo.books.setPosition("no-such-id", { unit: 1, page: 1 })).toBeUndefined();
   });
@@ -120,8 +122,12 @@ describe("inbox", () => {
     expect(removed).toEqual(added.item);
     expect(await repo.inbox.list()).toEqual([]);
 
-    expect(await repo.inbox.restore(added.item)).toEqual({ ok: true, item: added.item });
-    expect(await repo.inbox.list()).toEqual([added.item]);
+    // The restore is a new write, so only updatedAt is newer than before.
+    const restoredItem = { ...added.item, updatedAt: expect.any(String) };
+    const restored = await repo.inbox.restore(added.item);
+    expect(restored).toEqual({ ok: true, item: restoredItem });
+    expect(restored.ok && restored.item.updatedAt > added.item.updatedAt).toBe(true);
+    expect(await repo.inbox.list()).toEqual([restoredItem]);
   });
 });
 
