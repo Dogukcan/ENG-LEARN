@@ -6,7 +6,7 @@ interface KelimeBadgeProps {
 }
 
 /*
- * Neutral count badge on the Kelime tab icon, matching design/drafts/today-d.html (.nav-badge).
+ * Neutral count badge on the Kelime tab icon, matching the nav badge of design draft D.
  * Hidden when count is 0 (or negative) so an empty inbox leaves the tab bar quiet.
  */
 function KelimeBadge({ count }: KelimeBadgeProps) {

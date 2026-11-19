@@ -1,5 +1,5 @@
 /*
- * Design tokens frozen from design/drafts/today-d.html and design/ui-freeze.md.
+ * Design tokens frozen from design draft D and its UI direction notes.
  *
  * Why tokens live in plain CSS custom properties instead of hardcoded Tailwind values:
  * 1. A single variable name (e.g. --ground, --surface, --text) switches automatically

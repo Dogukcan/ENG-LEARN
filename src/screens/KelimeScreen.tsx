@@ -10,7 +10,7 @@ import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
 import { useTimer } from "../features/timer/TimerProvider.tsx";
 
 /**
- * Kelime screen, variant 2 "Tek tek" (chosen as the default in design/ui-freeze.md).
+ * Kelime screen, variant 2 "Tek tek" (chosen as the default in the frozen UI direction).
  * This component only loads data and owns the two dialogs; the rows live in src/features/kelime.
  */
 export function KelimeScreen() {

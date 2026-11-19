@@ -5,7 +5,7 @@ export interface TabIconProps {
 }
 
 /*
- * Inline SVG icons copied verbatim from design/drafts/today-d.html.
+ * Inline SVG icons copied verbatim from design draft D.
  *
  * Why each tab has a paired outline (1.75px stroke) and filled SVG instead of a pill background:
  * Native iPhone tab bars distinguish the active destination by switching from a 1.75px stroke
