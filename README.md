@@ -21,29 +21,9 @@ Okuma, kelime, dinleme ve konuşma çalışmalarını tek yerde takip eder.
 - `ts-fsrs` ile tekrar zamanlaması
 - Vitest ile testler, oxlint ile lint
 
-## Yerelde çalıştırma
-
-```bash
-npm install
-cp .env.example .env.local
-npm run dev
-```
-
-`.env.local` dosyasına kendi Supabase projenin adresini ve `anon` anahtarını yaz.
-`service_role` anahtarını bu dosyaya asla yazma. Ayrıntı: `supabase/README.md`.
-
-Diğer komutlar:
-
-```bash
-npm test
-npm run lint
-npm run build
-```
-
 ## Belgeler
 
 - `docs/ogren/`: Her aşamada ne yapıldığını anlatan Türkçe öğrenme notları.
-- `docs/yayin.md`: Yayına alma rehberi.
 - `docs/lisanslar.md`: Kullanılan veri kaynakları ve lisansları.
 
 ## Haklar ve lisans
