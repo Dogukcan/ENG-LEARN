@@ -3,8 +3,8 @@
 Bu fazda uygulama ilk kez gerçekten işe yarar hale geldi. Kelimeyi gelen kutusuna atıyorsun. Sonra "öğren" diyorsun.
 Uygulama o kelimeyi doğru zamanda sana tekrar soruyor. Bu notta bunun nasıl çalıştığını anlatıyorum.
 
-Bu faz iki adımda yapıldı. Adım A veri ve zamanlama motoruydu (`docs/briefs/faz-2a-engine.md`). Adım B ekranlardı
-(`docs/briefs/faz-2b-screens.md`).
+Bu faz iki adımda yapıldı. Adım A veri ve zamanlama motoruydu (`src/data/`). Adım B ekranlardı
+(`src/features/kelime/` ve `src/screens/KelimeScreen.tsx`).
 
 ## Kullanılan teknolojiler ve bu projedeki rolleri
 
