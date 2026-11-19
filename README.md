@@ -3,6 +3,21 @@
 Kişisel İngilizce öğrenme uygulaması. Telefona kurulabilen bir web uygulaması (PWA) olarak çalışır.
 Okuma, kelime, dinleme ve konuşma çalışmalarını tek yerde takip eder.
 
+## Ekran görüntüleri
+
+Görüntüler telefon boyutunda (390 × 844) alındı. İçindeki kelimeler, süreler ve videolar örnek veridir.
+
+<p>
+  <img src="docs/screenshots/bugun.png" width="240" alt="Bugün ekranı: sıradaki blok, günlük şerit ve kalan dakikalar">
+  <img src="docs/screenshots/kelime.png" width="240" alt="Kelime ekranı: tekrar bekleyen kartlar ve gelen kutusu">
+  <img src="docs/screenshots/okuma.png" width="240" alt="Okuma ekranı: kitap konumu ve kelime yakalama">
+</p>
+<p>
+  <img src="docs/screenshots/dinleme.png" width="240" alt="Dinleme ekranı: toplam dinleme süresi, hedef tahmini ve video listesi">
+  <img src="docs/screenshots/konusma.png" width="240" alt="Konuşma ekranı: senaryo seçimi ve görevler">
+  <img src="docs/screenshots/istatistik.png" width="240" alt="İstatistik ekranı: haftalık blok dağılımı ve özet sayılar">
+</p>
+
 ## Ekranlar
 
 - **Bugün:** Günün planı, tekrar bekleyen kelimeler ve tahmini süre.
