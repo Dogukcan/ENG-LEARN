@@ -29,6 +29,7 @@
   --accent-ink: #0a3a80;
   --positive: #2f7a45;
   --negative: #c41c29;
+  --on-negative: #ffffff;
   --pill-positive-bg: #dcfae5;
   --pill-positive-ink: #04250e;
   --pill-negative-bg: #ffedea;
@@ -109,6 +110,7 @@
     --accent-ink: #a9d4ff;
     --positive: #6ee794;
     --negative: #ff8a8f;
+    --on-negative: #2e1219;
     --pill-positive-bg: #10291a;
     --pill-positive-ink: #a6e6b9;
     --pill-negative-bg: #2e1219;
@@ -169,6 +171,7 @@
   --accent-ink: #a9d4ff;
   --positive: #6ee794;
   --negative: #ff8a8f;
+  --on-negative: #2e1219;
   --pill-positive-bg: #10291a;
   --pill-positive-ink: #a6e6b9;
   --pill-negative-bg: #2e1219;

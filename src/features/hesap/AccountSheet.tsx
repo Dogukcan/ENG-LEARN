@@ -418,7 +418,7 @@ function AccountBody({ onClose, email, onEmailChange, linkSent, sentAt, onSent, 
                   <button
                     type="button"
                     onClick={() => void doSignOut()}
-                    className="h-14 w-full rounded-[14px] bg-negative text-body font-semibold text-white active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text dark:text-pill-negative-bg"
+                    className="h-14 w-full rounded-[14px] bg-negative text-body font-semibold text-on-negative active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text"
                   >
                     Çıkış yap
                   </button>

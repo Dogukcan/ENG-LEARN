@@ -29,6 +29,7 @@
   --color-accent-ink: var(--accent-ink);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
+  --color-on-negative: var(--on-negative);
   --color-pill-positive-bg: var(--pill-positive-bg);
   --color-pill-positive-ink: var(--pill-positive-ink);
   --color-pill-negative-bg: var(--pill-negative-bg);
