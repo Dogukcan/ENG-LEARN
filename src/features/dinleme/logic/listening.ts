@@ -6,6 +6,13 @@
 import type { ActivityLog } from "../../../data/types";
 import { localDayRange, toLocalDay, type LocalDay } from "../../../data/localDay";
 
+/**
+ * The listening goal in hours. This is the single source for the goal, read by both the Dinleme
+ * and Istatistik screens. When the user should be able to edit it, add a `listeningGoalHours`
+ * setting and read it here instead.
+ */
+export const LISTENING_GOAL_HOURS = 50;
+
 /** How many local days (today included) the pace is measured over. */
 export const PACE_WINDOW_DAYS = 14;
 

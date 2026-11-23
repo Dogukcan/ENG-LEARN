@@ -6,14 +6,9 @@ import { SKILL_BLOCKS } from "../../data";
 import { addLocalDays, type LocalDay } from "../../data/localDay";
 import { ERROR_CATEGORY_LABELS, isErrorCategory } from "../konusma/logic/errorCategories";
 import { formatHoursMinutes, projectGoalDate } from "../dinleme/logic/listening";
+export { LISTENING_GOAL_HOURS } from "../dinleme/logic/listening";
 
 export const NBSP = "\u00A0";
-
-/**
- * The listening goal in hours. Nothing is stored for it yet (the Dinleme screen keeps the same
- * constant), so both screens show 50 sa until a settings field is added to the data layer.
- */
-export const LISTENING_GOAL_HOURS = 50;
 
 /** Days the listening pace is measured over (same window as the Dinleme screen). */
 export const PACE_DAYS = 14;

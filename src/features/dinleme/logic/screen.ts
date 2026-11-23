@@ -4,16 +4,10 @@
 import type { VideoLevel, VideoUnderstanding } from "../../../data";
 import type { LocalDay } from "../../../data/localDay";
 import { projectGoalDate } from "./listening";
+export { LISTENING_GOAL_HOURS } from "./listening";
 
 // A non-breaking space keeps "12 / 25 dk" and "17 Kasım 2026" on one line.
 const NBSP = "\u00A0";
-
-/**
- * The listening goal in hours. Kept as a constant on purpose: the settings store has no field
- * for it yet, and this task must not change the data layer. When the user should be able to edit
- * it, add a `listeningGoalHours` setting and read it here instead.
- */
-export const LISTENING_GOAL_HOURS = 50;
 
 /** Longest single entry we accept, in minutes (10 hours). Anything above is almost surely a typo. */
 export const MAX_MINUTES = 600;
