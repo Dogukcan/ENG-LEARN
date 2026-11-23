@@ -1,15 +1,38 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
+import type { Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { buildCsp } from './src/pwa/csp.ts'
 
 // The light "--ground" token. The manifest needs literal colours, so we repeat it here.
 const GROUND = '#e2f3f1'
+
+function productionCsp(): Plugin {
+  let policy: string
+  return {
+    name: 'production-csp',
+    apply: 'build',
+    configResolved(config) {
+      const env = loadEnv(config.mode, config.envDir, 'VITE_SUPABASE_URL')
+      policy = buildCsp(env.VITE_SUPABASE_URL)
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler: () => [{
+        tag: 'meta',
+        attrs: { 'http-equiv': 'Content-Security-Policy', content: policy },
+        injectTo: 'head-prepend',
+      }],
+    },
+  }
+}
 
 // https://vite.dev/config/
 // Tailwind CSS v4 uses a CSS-first configuration via @tailwindcss/vite instead of tailwind.config.js.
 export default defineConfig({
   plugins: [
+    productionCsp(),
     react(),
     tailwindcss(),
     VitePWA({
