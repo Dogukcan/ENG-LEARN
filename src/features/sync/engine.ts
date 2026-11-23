@@ -235,9 +235,10 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
   /**
    * The server already holds a live row with the same unique key (same word, video or card word)
-   * under another id: another device added it while this one was offline. The server's row wins:
-   * it is applied locally with a time newer than the local twin, so applyRemote turns the local
-   * twin into a tombstone. Returns false when no twin was found or it could not be applied.
+   * under another id: another device added it while this one was offline. The server's row
+   * always wins: writing over another device's card is unsafe without a server transaction.
+   * Adopting it uses a newer local time so applyRemote resolves the twin and moves review links.
+   * Returns false when no twin was found or the conflict could not be settled.
    */
   async function adoptServerTwin(store: SyncStore, row: SyncRow): Promise<boolean> {
     const column = UNIQUE_COLUMNS[store];
@@ -297,7 +298,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
             continue;
           }
           if (!single.error.code || !ROW_ERROR_CODES.has(single.error.code)) throw failureFrom(single.error);
-          // The server's twin wins; the local twin becomes a tombstone and is pushed next round.
+          // Adopt the server twin and move the losing card's logs locally.
           if (single.error.code === "23505" && (await adoptServerTwin(store, row))) continue;
           fail(row, single.error);
         }

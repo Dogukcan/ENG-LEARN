@@ -148,7 +148,7 @@ interface LooseStore {
   get(key: string): Promise<Loose | undefined>;
   put(value: Loose, key?: string): Promise<unknown>;
   delete(key: string): Promise<unknown>;
-  index(name: string): { get(key: string): Promise<Loose | undefined> };
+  index(name: string): { get(key: string): Promise<Loose | undefined>; getAll(key: string): Promise<Loose[]> };
   getAll(): Promise<Loose[]>;
 }
 
@@ -248,11 +248,19 @@ type Tx = IDBPTransaction<EngLearnDB, StoreNames<EngLearnDB>[], "readwrite">;
  */
 const SEED_BOOK_IDS: Record<string, string> = { RW1: "seed-rw1", RW2: "seed-rw2" };
 
+/**
+ * Seed rows are not a real edit, so they carry the oldest possible time. Why: they used to be
+ * stamped "now", so a fresh second device pushed "unit 1, page 1" and the server accepted it as
+ * the newest change, overwriting the real progress of the first device. At the epoch, last write
+ * wins never prefers a seed row, and `listChangedSince` (strictly after the cursor) never lists it
+ * for a push. The first real edit (setPosition/upsert) stamps a normal time.
+ */
+const SEED_UPDATED_AT = "1970-01-01T00:00:00.000Z";
+
 function seedBooks(): Book[] {
-  const now = new Date().toISOString();
   return [
-    { id: SEED_BOOK_IDS.RW1, title: "Reader at Work 1", shortName: "RW1", unit: 1, page: 1, updatedAt: now },
-    { id: SEED_BOOK_IDS.RW2, title: "Reader at Work 2", shortName: "RW2", unit: 1, page: 1, updatedAt: now },
+    { id: SEED_BOOK_IDS.RW1, title: "Reader at Work 1", shortName: "RW1", unit: 1, page: 1, updatedAt: SEED_UPDATED_AT },
+    { id: SEED_BOOK_IDS.RW2, title: "Reader at Work 2", shortName: "RW2", unit: 1, page: 1, updatedAt: SEED_UPDATED_AT },
   ];
 }
 
@@ -281,7 +289,9 @@ async function mergeSeedBookCopies(
 
     const live = named.filter(isLiveRow);
     const donor = live.reduce((best, book) => ((book.updatedAt as string) > (best.updatedAt as string) ? book : best));
-    // The merged row must be newer than every row it replaces, the old seed tombstone included.
+    // A merge is a real local change and must reach the server, so give it a fresh time; only
+    // brand-new seed rows in seedBooks keep the epoch stamp. This can let a stale v4 copy
+    // overwrite newer progress from another device, accepted because no v4 build was ever published.
     const newest = named.reduce((max, book) => ((book.updatedAt as string) > max ? (book.updatedAt as string) : max), "");
     await stores.books.put({
       id: seedId,
@@ -317,6 +327,53 @@ async function mergeSeedBookCopies(
       }
     }
   }
+}
+
+/** Keep every review when a twin card loses, and stamp the changed links for the next push. */
+async function moveCardReviewLogs(logs: LooseStore, loserId: string, winnerId: string, now: Date): Promise<void> {
+  for (const log of await logs.index("by-cardId").getAll(loserId)) {
+    await logs.put({ ...log, cardId: winnerId, updatedAt: stampFrom(now, log.updatedAt as string) });
+  }
+}
+
+/**
+ * A local word was tombstoned because the server already has the same word under another id
+ * (unique-twin adoption). Its card must not keep pointing to the dead word: the review queue
+ * would never show it, and the learner would lose that word's schedule. Runs in the same
+ * transaction as the word tombstone.
+ *  - Surviving word has no live card: the dead word's card is re-pointed to the survivor. The
+ *    card keeps its id, FSRS state and review logs.
+ *  - Surviving word already has a live card: the card with more reps stays (a tie keeps the
+ *    survivor's card) and the other is tombstoned. A word has exactly one card.
+ */
+async function moveCardAfterWordTwin(
+  cards: LooseStore,
+  reviewLogs: LooseStore,
+  deadWordId: string,
+  survivorWordId: string,
+  now: Date,
+): Promise<void> {
+  const deadCard = await cards.index("by-wordId").get(deadWordId);
+  if (!deadCard || !isLive(deadCard as { deletedAt?: string })) return;
+  const survivorCard = await cards.index("by-wordId").get(survivorWordId);
+  const survivorLive = survivorCard !== undefined && isLive(survivorCard as { deletedAt?: string });
+
+  if (survivorLive && (survivorCard.reps as number) >= (deadCard.reps as number)) {
+    await cards.put(tombstone(deadCard as { updatedAt: string }, now));
+    await moveCardReviewLogs(reviewLogs, deadCard.id as string, survivorCard.id as string, now);
+    return;
+  }
+  // by-wordId is unique even for soft-deleted cards, so the survivor's old record (a tombstone, or
+  // a live card with fewer reps) is removed for real before the winner takes the word id.
+  if (survivorCard) {
+    await moveCardReviewLogs(reviewLogs, survivorCard.id as string, deadCard.id as string, now);
+    await cards.delete(survivorCard.id as string);
+  }
+  await cards.put({
+    ...deadCard,
+    wordId: survivorWordId,
+    updatedAt: stampFrom(now, deadCard.updatedAt as string),
+  });
 }
 
 /** Trim optional text; blank text becomes "not given" (undefined). */
@@ -910,9 +967,15 @@ export function createIndexedDbRepository(
         const database = await db();
 
         // by-due holds ISO strings, so "due <= now" is a range query ending at now.
+        // A card whose word is missing or deleted (for example after a twin adoption) can never be
+        // shown. It must be dropped BEFORE the session cap and the counts, or it would take a slot
+        // and inflate dueTotal / newToday.
+        const liveWordIds = new Set(
+          (await database.getAll("words")).filter(isLive).map((word) => word.id),
+        );
         const due = (
           await database.getAllFromIndex("cards", "by-due", IDBKeyRange.upperBound(now.toISOString()))
-        ).filter(isLive);
+        ).filter((card) => isLive(card) && liveWordIds.has(card.wordId));
 
         // Sort by the chance of recalling the word, lowest first. A card at 60% is much closer
         // to being forgotten than one at 89%, so limited session time goes to the first one.
@@ -937,7 +1000,10 @@ export function createIndexedDbRepository(
           cards,
           dueTotal: due.length,
           estimatedMinutes: (cards.length * secondsPerCard) / 60,
-          newToday: countCreatedOnLocalDay(await database.getAll("cards"), now),
+          newToday: countCreatedOnLocalDay(
+            (await database.getAll("cards")).filter((card) => liveWordIds.has(card.wordId)),
+            now,
+          ),
           newLimit: settings.newCardLimit,
         };
       },
@@ -977,6 +1043,11 @@ export function createIndexedDbRepository(
           const log = cursor.value;
           const cards = tx.objectStore("cards");
           const current = await cards.get(log.cardId);
+          // Twin adoption can move this log without changing its historical snapshot. Restoring
+          // that snapshot would revive a losing card or put it back on the losing word.
+          if (!isLive(current) || current.wordId !== log.previousCard.wordId || current.id !== log.previousCard.id) {
+            return { ok: false, reason: "nothing-to-undo" };
+          }
           // The snapshot restores everything, including lapses and the leech flag. Its updatedAt
           // must be newer than the card it replaces, or another device would ignore the undo.
           const restored: Card = {
@@ -1331,7 +1402,10 @@ export function createIndexedDbRepository(
           : store === "videos" ? { field: "youtubeKey", index: "by-youtubeKey", from: "youtubeId" }
           : undefined;
 
-        await inTransaction([store], async (tx) => {
+        // A twin's card and review links move atomically with the conflict resolution.
+        const stores: StoreNames<EngLearnDB>[] = store === "words" ? ["words", "cards", "reviewLogs"]
+          : store === "cards" ? ["cards", "reviewLogs"] : [store];
+        await inTransaction(stores, async (tx) => {
           const os = tx.objectStore(store) as unknown as LooseStore;
           const now = new Date();
           for (const row of incoming) {
@@ -1363,6 +1437,15 @@ export function createIndexedDbRepository(
                 }
                 // The remote row is newer: the local twin loses. Free its unique key first.
                 await os.put(tombstone(other as { updatedAt: string }, now, uniqueKey.field));
+                if (store === "words") {
+                  await moveCardAfterWordTwin(
+                    tx.objectStore("cards") as unknown as LooseStore,
+                    tx.objectStore("reviewLogs") as unknown as LooseStore,
+                    other.id as string,
+                    row.id as string,
+                    now,
+                  );
+                }
               }
               stored[uniqueKey.field] = value;
             }
@@ -1380,6 +1463,12 @@ export function createIndexedDbRepository(
                 }
                 // The other card is an old tombstone or older than the remote card. A word has
                 // one card, so the stale record is removed for real.
+                await moveCardReviewLogs(
+                  tx.objectStore("reviewLogs") as unknown as LooseStore,
+                  other.id as string,
+                  row.id as string,
+                  now,
+                );
                 await os.delete(other.id as string);
               }
             }

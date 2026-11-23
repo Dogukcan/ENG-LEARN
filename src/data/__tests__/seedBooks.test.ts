@@ -125,3 +125,29 @@ describe("clearLocalData", () => {
     expect(await repo.sync.listChangedSince("activity", "1970-01-01T00:00:00.000Z")).toEqual([]);
   });
 });
+
+describe("seed rows never win last write wins", () => {
+  it("a new database seeds books at the epoch", async () => {
+    const repo = createIndexedDbRepository(freshName());
+    expect((await repo.books.list()).map((b) => b.updatedAt)).toEqual([
+      "1970-01-01T00:00:00.000Z",
+      "1970-01-01T00:00:00.000Z",
+    ]);
+  });
+
+  it("the v5 merge gets pushed after the copies' timestamps", async () => {
+    const name = freshName();
+    await makeV4(name, {
+      books: [
+        book("b-old", "RW1", 3, "2026-11-01T08:00:00.000Z"),
+        book("b-new", "RW1", 9, "2026-11-05T08:00:00.000Z"),
+      ],
+    });
+    const repo = createIndexedDbRepository(name);
+    const merged = (await repo.books.list()).find((b) => b.id === "seed-rw1");
+    expect(merged).toMatchObject({ page: 9 });
+    expect(merged !== undefined && merged.updatedAt > "2026-11-05T08:00:00.000Z").toBe(true);
+    const rows = await repo.sync.listChangedSince("books", "2026-11-06T00:00:00.000Z");
+    expect(rows).toContainEqual(expect.objectContaining({ id: "seed-rw1", unit: 1, page: 9 }));
+  });
+});

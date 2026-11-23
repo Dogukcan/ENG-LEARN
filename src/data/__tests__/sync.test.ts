@@ -173,7 +173,8 @@ describe("listChangedSince", () => {
     const videos = await repo.sync.listChangedSince("videos", EPOCH);
     expect(videos).toHaveLength(1);
     expect(videos[0]).not.toHaveProperty("youtubeKey");
-    expect((await repo.sync.listChangedSince("books", EPOCH)).length).toBe(2);
+    // Seed books sit at the epoch on purpose: they are not a real edit and are never pushed.
+    expect((await repo.sync.listChangedSince("books", EPOCH)).length).toBe(0);
   });
 });
 
