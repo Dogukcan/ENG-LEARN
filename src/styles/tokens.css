@@ -12,10 +12,10 @@
 :root,
 :root[data-theme="light"],
 [data-theme="light"] {
-  /* Core surfaces and text (light theme — pale turquoise ground) */
+  /* Core surfaces and text (light theme — pale turquoise ground, cream panels) */
   --ground: #e2f3f1;
-  --surface: #ffffff;
-  --raised: #f2f8fd;
+  --surface: #fbf7ef;
+  --raised: #f5f0e5;
   --border: #d5e3e1;
   --rule: #eef4f3;
   --control: #d6d9dd;
@@ -96,15 +96,15 @@
 /* System dark mode (unless explicitly forced to light via data-theme="light") */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ground: #0b1a1a;
-    --surface: #132224;
-    --raised: #192b2e;
-    --border: #223639;
-    --rule: #1c2e31;
-    --control: #35494c;
-    --track-empty: #435457;
+    --ground: #0f2a2c;
+    --surface: #173b3e;
+    --raised: #1d4447;
+    --border: #2a5357;
+    --rule: #214a4d;
+    --control: #3b6266;
+    --track-empty: #4d7276;
     --text: #f3f5f7;
-    --muted: #9ba4a6;
+    --muted: #a9bcbd;
     --accent: #478cf5;
     --accent-soft: #0f2238;
     --accent-ink: #a9d4ff;
@@ -115,7 +115,7 @@
     --pill-positive-ink: #a6e6b9;
     --pill-negative-bg: #2e1219;
     --pill-negative-ink: #ffb3c4;
-    --pill-neutral-bg: #203336;
+    --pill-neutral-bg: #25494c;
     --pill-neutral-ink: #e2e5e9;
     --pill-accent-bg: #0f2238;
     --pill-accent-ink: #a9d4ff;
@@ -157,15 +157,15 @@
 /* Explicit dark theme override via data-theme="dark" on :root or any container */
 :root[data-theme="dark"],
 [data-theme="dark"] {
-  --ground: #0b1a1a;
-  --surface: #132224;
-  --raised: #192b2e;
-  --border: #223639;
-  --rule: #1c2e31;
-  --control: #35494c;
-  --track-empty: #435457;
+  --ground: #0f2a2c;
+  --surface: #173b3e;
+  --raised: #1d4447;
+  --border: #2a5357;
+  --rule: #214a4d;
+  --control: #3b6266;
+  --track-empty: #4d7276;
   --text: #f3f5f7;
-  --muted: #9ba4a6;
+  --muted: #a9bcbd;
   --accent: #478cf5;
   --accent-soft: #0f2238;
   --accent-ink: #a9d4ff;
@@ -176,7 +176,7 @@
   --pill-positive-ink: #a6e6b9;
   --pill-negative-bg: #2e1219;
   --pill-negative-ink: #ffb3c4;
-  --pill-neutral-bg: #203336;
+  --pill-neutral-bg: #25494c;
   --pill-neutral-ink: #e2e5e9;
   --pill-accent-bg: #0f2238;
   --pill-accent-ink: #a9d4ff;
