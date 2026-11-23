@@ -31,6 +31,28 @@ function productionCsp(): Plugin {
 // https://vite.dev/config/
 // Tailwind CSS v4 uses a CSS-first configuration via @tailwindcss/vite instead of tailwind.config.js.
 export default defineConfig({
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor-react',
+              test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+            },
+            {
+              name: 'vendor-supabase',
+              test: /[\\/]node_modules[\\/]@supabase[\\/]/,
+            },
+            {
+              name: 'vendor-data',
+              test: /[\\/]node_modules[\\/](ts-fsrs|zod|idb)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
   plugins: [
     productionCsp(),
     react(),
