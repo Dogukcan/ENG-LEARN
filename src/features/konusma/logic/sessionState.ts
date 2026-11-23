@@ -6,6 +6,11 @@
 // report box while the timer (kept in localStorage) is still running. sessionStorage is enough: it
 // survives a reload and does not keep a stale draft forever. Every access is wrapped because storage
 // can throw (private mode, blocked site data).
+//
+// localStorage, not sessionStorage: a home-screen PWA that iOS kills loses its sessionStorage, so the
+// state must live in localStorage. Because localStorage never clears itself, the saved step and
+// scenario carry a timestamp and are dropped after 12 hours; otherwise a talk from yesterday would
+// reopen at step 3. The report draft has no expiry: it is cleared after a successful save.
 
 export type Step = "1" | "2" | "3";
 
@@ -14,13 +19,19 @@ export interface SavedSession {
   scenarioId: string;
 }
 
+export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
 const SESSION_KEY = "eng-learn:konusma-session";
 const REPORT_KEY = "eng-learn:konusma-report-draft";
 
 const STEPS: readonly Step[] = ["1", "2", "3"];
 
 /** Read what storage returned; anything odd (bad JSON, unknown step or scenario) means "nothing saved". */
-export function parseSavedSession(raw: string | null, validScenarioIds: readonly string[]): SavedSession | null {
+export function parseSavedSession(
+  raw: string | null,
+  validScenarioIds: readonly string[],
+  now: number = Date.now(),
+): SavedSession | null {
   if (!raw) return null;
   let value: unknown;
   try {
@@ -29,7 +40,9 @@ export function parseSavedSession(raw: string | null, validScenarioIds: readonly
     return null;
   }
   if (typeof value !== "object" || value === null) return null;
-  const { step, scenarioId } = value as Record<string, unknown>;
+  const { step, scenarioId, savedAt } = value as Record<string, unknown>;
+  // A missing or future timestamp (clock change) is treated as expired: better to start fresh.
+  if (typeof savedAt !== "number" || savedAt > now || now - savedAt > SESSION_MAX_AGE_MS) return null;
   if (typeof step !== "string" || !STEPS.includes(step as Step)) return null;
   if (typeof scenarioId !== "string" || !validScenarioIds.includes(scenarioId)) return null;
   return { step: step as Step, scenarioId };
@@ -46,7 +59,7 @@ export function initialStep(saved: SavedSession | null, konusmaTimerRunning: boo
 
 function storage(): Storage | null {
   try {
-    return window.sessionStorage;
+    return window.localStorage;
   } catch {
     return null;
   }
@@ -62,7 +75,7 @@ export function loadSavedSession(validScenarioIds: readonly string[]): SavedSess
 
 export function saveSession(session: SavedSession): void {
   try {
-    storage()?.setItem(SESSION_KEY, JSON.stringify(session));
+    storage()?.setItem(SESSION_KEY, JSON.stringify({ ...session, savedAt: Date.now() }));
   } catch {
     // Without storage the screen still works; it just will not survive a reload.
   }
