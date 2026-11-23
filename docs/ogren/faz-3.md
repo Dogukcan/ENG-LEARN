@@ -62,7 +62,7 @@ Okuma yolu: Kitap konumu `repository.books.setPosition` ile (`BookPanel.tsx:58`)
 (`CapturePanel.tsx:34`) yazılır.
 
 Dinleme yolu: Link yapıştırılır, `parseYouTubeId` kimliği çıkarır, `fetchOEmbed` YouTube'dan başlığı alır,
-`repository.videos.add` videoyu kaydeder (`AddSheet.tsx:128`). "İzledim" tuşu `markWatched` çağırır
+`repository.videos.add` videoyu kaydeder (`AddSheet.tsx:129`). "İzledim" tuşu `markWatched` çağırır
 (`DinlemeScreen.tsx:68`); bu, videonun uzunluğu kadar dakikayı Dinleme etkinliği olarak yazar.
 
 ## Yeni kavramlar
@@ -102,7 +102,7 @@ yazılır (`secondsToRecord`, `timerMath.ts:43`). 0 saniye çalıştıysa hiçbi
 Üst sınır 180 dakikadır (`MAX_TIMER_SECONDS`, `timerMath.ts:29`). Gece boyunca açık unutulan sayaç 600
 dakika yazıp haftalık rakamları bozmasın diye bu sınır var.
 
-Bir günün dakikaları `minutesPerBlockForDay` ile okunur (`src/data/indexeddb.ts:1026`). Önce o günün
+Bir günün dakikaları `minutesPerBlockForDay` ile okunur (`src/data/indexeddb.ts:1097`). Önce o günün
 kayıtlarının saniyeleri toplanır, sonra bir kez 60'a bölünür. Kısa oturumlar böylece tam toplanır.
 
 Kelime tekrarı da dakika yazar. `recordReviewMinutes` (`src/features/review/recordReview.ts:9`) oturum
@@ -188,38 +188,39 @@ gibi davranamaz. Kimlik 11 karakterlik izinli alfabeye uymak zorundadır.
 oEmbed, bir sitenin "bu linkin başlığı, kanalı ve resmi nedir" sorusuna açık cevap veren standart bir
 adresidir. API anahtarı gerekmez. Bu yüzden saklanacak bir sır yoktur.
 
-`fetchOEmbed` (`youtube.ts:91`) önce kimliği çıkarır. Link geçersizse internete hiç çıkmaz. Cevabı Zod ile
-denetler (`youtube.ts:69`): başlık, kanal ve resim adresi yazı olmak zorundadır. Hata üç türdür
-(`youtube.ts:83`): `network` (bağlantı yok, sonra denenebilir), `not-found` (video gizli ya da silinmiş) ve
+`fetchOEmbed` (`youtube.ts:100`) önce kimliği çıkarır. Link geçersizse internete hiç çıkmaz. Cevabı Zod ile
+denetler (`youtube.ts:78`): başlık ve kanal yazı olmak zorundadır. Resim adresi sadece `https://i.ytimg.com`
+ile başlıyorsa kabul edilir; değilse yok sayılır ve küçük resim video kimliğinden üretilir. Hata üç türdür
+(`youtube.ts:92`): `network` (bağlantı yok, sonra denenebilir), `not-found` (video gizli ya da silinmiş) ve
 `invalid` (beklenmeyen şekil). Fonksiyon asla hata fırlatmaz, her zaman bir sonuç nesnesi döndürür.
 
 Form tarafında (`AddSheet.tsx:78`) arama, kimlik değişince başlar. Sonuç gelmeden yeni bir link yapıştırılırsa
-eski cevap atılır. Sen başlığı elle değiştirdiysen geç gelen cevap onu ezmez (`AddSheet.tsx:64`,
+eski cevap atılır. Sen başlığı elle değiştirdiysen geç gelen cevap onu ezmez (`AddSheet.tsx:65`,
 `titleTouched`). oEmbed başarısız olursa "Başlığı kendin yaz" denir. Süreyi (dakika) YouTube vermez, onu sen yazarsın.
 
 ### Dinleme: videos deposu
 Videolar IndexedDB'de `videos` deposundadır. Aynı video iki kez eklenemesin diye `by-youtubeKey` indeksi
-`unique` tanımlıdır (`indexeddb.ts:516`). `add` önce bu indekse bakar ve varsa `duplicate` döndürür
-(`indexeddb.ts:1065`). Silinmiş videoların anahtarı kaldırıldığı için aynı video tekrar eklenebilir.
+`unique` tanımlıdır (`indexeddb.ts:573`). `add` önce bu indekse bakar ve varsa `duplicate` döndürür
+(`indexeddb.ts:1136`). Silinmiş videoların anahtarı kaldırıldığı için aynı video tekrar eklenebilir.
 
-"İzledim" (`markWatched`, `indexeddb.ts:1091`) tek bir transaction içinde iki şey yapar: videoyu
+"İzledim" (`markWatched`, `indexeddb.ts:1162`) tek bir transaction içinde iki şey yapar: videoyu
 "izlendi" yapar ve videonun süresi kadar Dinleme etkinliği yazar. Biri olmadan diğeri olmaz. "Geri al"
-(`undoWatched`, `indexeddb.ts:1127`) aynı etkinliği siler.
+(`undoWatched`, `indexeddb.ts:1198`) aynı etkinliği siler.
 
 Dışarıda dinlediğin dakikalar (podcast, konuşma) aynı şekilde Dinleme etkinliğine yazılır, kaynağı
-`manual` olur (`AddSheet.tsx:261`).
+`manual` olur (`AddSheet.tsx:262`).
 
 ### Dinleme: toplam saat ve tarih tahmini
 Toplam dinleme, bütün Dinleme etkinliklerinin saniyelerini toplayıp bir kez aşağı yuvarlar
-(`totalListeningMinutes`, `indexeddb.ts:1245`). Hedef 50 saattir (`LISTENING_GOAL_HOURS`,
-`src/features/dinleme/logic/screen.ts:16`). Hedef sabittir, ayar olarak değiştirilemez.
+(`totalListeningMinutes`, `indexeddb.ts:1316`). Hedef 50 saattir (`LISTENING_GOAL_HOURS`,
+`src/features/dinleme/logic/listening.ts:14`). Hedef sabittir, ayar olarak değiştirilemez.
 
-Hız, son 14 günün toplamının 14'e bölünmesidir (`PACE_WINDOW_DAYS`, `listening.ts:10`; ekranda
-`paceFromDayMinutes`, `screen.ts:69`). Çalışmadığın günler de sayılır. Aksi halde tahmin fazla iyimser olurdu.
+Hız, son 14 günün toplamının 14'e bölünmesidir (`PACE_WINDOW_DAYS`, `listening.ts:17`; ekranda
+`paceFromDayMinutes`, `screen.ts:63`). Çalışmadığın günler de sayılır. Aksi halde tahmin fazla iyimser olurdu.
 
-Tahmin (`projectGoalDate`, `listening.ts:68`): kalan dakika, hıza bölünüp yukarı yuvarlanır ve bugüne eklenir.
+Tahmin (`projectGoalDate`, `listening.ts:75`): kalan dakika, hıza bölünüp yukarı yuvarlanır ve bugüne eklenir.
 Hız 0 ise tarih hesaplanamaz. Hedefe ulaşıldıysa bugün döner. Ekran bu üç durumu `forecastText` ile
-(`screen.ts:87`) "tarih", "Hedefe ulaştın" ya da "Hesaplanamadı" olarak gösterir.
+(`screen.ts:81`) "tarih", "Hedefe ulaştın" ya da "Hesaplanamadı" olarak gösterir.
 
 ### Gece yarısını geçen yenileme
 Ekran "bugün" ve "vadesi gelen kart" bilgisini yüklenirken hesaplar. iPhone'da uygulama gece boyunca

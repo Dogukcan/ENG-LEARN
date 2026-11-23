@@ -44,10 +44,10 @@ Kelimenin yolu şöyle:
 1. Sen formdan kelime eklersin. `AddWordForm.tsx` `repository.inbox.add` çağırır. Kelime gelen kutusuna girer.
 2. `InboxTriage.tsx` kelimeyi tek tek gösterir. "Öğren" dersen `repository.words.triage(..., "learning")` çalışır.
    Bu çağrı tek transaction içinde iki iş yapar: kelime `words` deposuna geçer ve `cards` deposuna yeni bir kart eklenir
-   (`src/data/indexeddb.ts:831`).
+   (`src/data/indexeddb.ts:896`).
 3. Kart hemen "vadesi gelmiş" olur. `KelimeScreen.tsx` kuyruğu `getReviewQueue` ile okur ve "n kart" yazar.
 4. "Tekrara başla" dersen `ReviewSession.tsx` açılır. Her cevapta `reviewCard` çalışır. Kart yeni durumunu alır
-   ve bir `ReviewLog` kaydı yazılır. İkisi aynı transaction içindedir (`src/data/indexeddb.ts:945`).
+   ve bir `ReviewLog` kaydı yazılır. İkisi aynı transaction içindedir (`src/data/indexeddb.ts:1015`).
 5. Her yazma işleminden sonra depo dinleyicilere haber verir. Ekranlar veriyi yeniden yükler.
 
 Kısaca: ekran → `repository` → `indexeddb.ts` → IndexedDB. Ekran sonra `subscribe` ile "veri değişti" haberi alır.
@@ -77,10 +77,10 @@ derecelendirmesine çevirir (`scheduler.ts:136`). ts-fsrs dört not bilir. Biz i
   "Unuttum" dersen sayılır (`scheduler.ts:154`). Öğrenme adımlarında yanılmak lapse değildir. Bu kuralı Anki de kullanır.
   Böylece normal çabalama seni suçlu kelime yapmaz.
 - **Leech** (sülük): 5 lapse'e ulaşan kelime. Zaman yer, başka yöntem gerekir. Eşik `scheduler.ts:11` içinde `LEECH_THRESHOLD`.
-  Kart `leech: true` olur ve `listLeeches` onu listeler (`indexeddb.ts:993`).
+  Kart `leech: true` olur ve `listLeeches` onu listeler (`indexeddb.ts:1064`).
 
 ### Tekrar kuyruğu
-`getReviewQueue` (`src/data/indexeddb.ts:907`) üç şey yapar.
+`getReviewQueue` (`src/data/indexeddb.ts:964`) üç şey yapar.
 1. Vadesi gelmiş kartları bulur. `by-due` indeksi ile "vade bugünden önce mi" diye aralık sorgusu yapar.
 2. Kartları hatırlama olasılığına göre dizer. En çok unutulmak üzere olan kart en başa gelir.
    Sadece tarihe bakmak yetmez. Bir gün gecikmiş ama sağlam kart ile bir gün gecikmiş kırılgan kart aynı değildir.
@@ -90,23 +90,23 @@ Hatırlama olasılığı FSRS'in unutma eğrisinden gelir (`scheduler.ts:199`). 
 
 ### Yeni kart sınırı
 Günde en fazla 10 yeni kart açılır. Sınır dolunca "Öğren" `{ ok: false, reason: "new-card-limit" }` döner ve hiçbir şey değişmez
-(`indexeddb.ts:886`). Gün, cihazın saat dilimine göre hesaplanır. Bu Faz 1'deki "yerel gün" fikridir.
+(`indexeddb.ts:943`). Gün, cihazın saat dilimine göre hesaplanır. Bu Faz 1'deki "yerel gün" fikridir.
 
 ### Tekrar yakalama (`previousStatus`)
 "Biliyorum" ya da "Yok say" dediğin kelimeyi ileride yine gelen kutusuna ekleyebilirsin. Bu serbest. Kaydın üstüne `previousStatus` yazılır
-(`indexeddb.ts:655`). Ekranda "Daha önce: biliyorum" görürsün. Zaten öğrendiğin bir kelime reddedilir (`already-learning`, `indexeddb.ts:649`).
-Ayıklarken ikinci bir `Word` açılmaz. Var olan kelime güncellenir (`indexeddb.ts:851`).
+(`indexeddb.ts:712`). Ekranda "Daha önce: biliyorum" görürsün. Zaten öğrendiğin bir kelime reddedilir (`already-learning`, `indexeddb.ts:706`).
+Ayıklarken ikinci bir `Word` açılmaz. Var olan kelime güncellenir (`indexeddb.ts:912`).
 
 ### IndexedDB sürümleri v2 - v5
-Veritabanı yapısı değişince sürüm numarası artar. `upgrade` fonksiyonu eski cihazdaki veriyi taşır (`indexeddb.ts:467`). Sürüm sabiti `indexeddb.ts:102`.
-- **v2**: `cards` ve `reviewLogs` depoları eklendi. `by-wordId` indeksi `unique`. Yani bir kelimeye tek kart (`indexeddb.ts:493`).
-- **v3**: Kelime anahtarları (`normalized`) yeni kuralla yeniden hesaplandı. Eğri ve düz kesme işareti aynı sayılsın diye (`indexeddb.ts:505`).
-- **v4**: Senkron için her kayda `updatedAt` ve her depoya `by-updatedAt` indeksi geldi. Yeni depolar: videolar, konuşma kayıtları (`indexeddb.ts:512`).
-- **v5**: İki hazır kitabın sabit kimlikleri oldu, eski rastgele kimlikli kopyalar birleştirildi (`indexeddb.ts:572`).
+Veritabanı yapısı değişince sürüm numarası artar. `upgrade` fonksiyonu eski cihazdaki veriyi taşır (`indexeddb.ts:524`). Sürüm sabiti `indexeddb.ts:102`.
+- **v2**: `cards` ve `reviewLogs` depoları eklendi. `by-wordId` indeksi `unique`. Yani bir kelimeye tek kart (`indexeddb.ts:554`).
+- **v3**: Kelime anahtarları (`normalized`) yeni kuralla yeniden hesaplandı. Eğri ve düz kesme işareti aynı sayılsın diye (`indexeddb.ts:562`).
+- **v4**: Senkron için her kayda `updatedAt` ve her depoya `by-updatedAt` indeksi geldi. Yeni depolar: videolar, konuşma kayıtları (`indexeddb.ts:569`).
+- **v5**: İki hazır kitabın sabit kimlikleri oldu, eski rastgele kimlikli kopyalar birleştirildi (`indexeddb.ts:629`).
 
 Kural: `oldVersion < 2` gibi koşullar sırayla çalışır. Yeni cihaz 0'dan 5'e, eski cihaz kaldığı yerden 5'e gider.
 Upgrade içinde sadece IndexedDB isteklerini `await` et. Başka şey beklersen tarayıcı transaction'ı erken kapatır.
-Bu yüzden zamanlayıcı transaction açılmadan önce beklenir (`indexeddb.ts:834`).
+Bu yüzden zamanlayıcı transaction açılmadan önce beklenir (`indexeddb.ts:891`).
 
 ### Cloze (boşluk doldurma) ve cevap kontrolü
 `buildPrompt` (`src/data/srs/prompt.ts:80`) karta ne yazılacağına karar verir.
@@ -120,7 +120,7 @@ Bu yüzden zamanlayıcı transaction açılmadan önce beklenir (`indexeddb.ts:8
 ### Depo aboneliği: `subscribe` ve `useRepoData`
 Sorun şu: formdan kelime eklenince başka bir ekrandaki sayı da değişmeli. Çözüm iki parça.
 - `repository.subscribe(listener)` (`src/data/repository.ts:264`): "bir yazma bitti, haber ver" kaydı. Haber, transaction bittikten sonra gider.
-  `notifying` sarmalayıcısı bunu sağlar (`indexeddb.ts:361`). Hiçbir şey değiştirmeyen yazma (`ok: false`) haber vermez.
+  `notifying` sarmalayıcısı bunu sağlar (`indexeddb.ts:418`). Hiçbir şey değiştirmeyen yazma (`ok: false`) haber vermez.
 - `useRepoData(load, deps)` (`src/data/react.ts:12`): Bir React hook'u. Açılışta, `deps` değişince ve her yazmadan sonra `load` çalıştırır.
   Yavaş eski cevap yeni cevabın üstüne yazmasın diye `cancelled` bayrağı kullanır (`react.ts:37`).
 
@@ -143,4 +143,4 @@ Sorun şu: formdan kelime eklenince başka bir ekrandaki sayı da değişmeli. �
   (`InboxTriage.tsx:97-98`).
 - `ReviewSession.tsx:34` oturumu `Sheet` içine koyar. Kuyruk açılışta bir kez yüklenir (`ReviewSession.tsx:105`). Oturum sırasında kartlar yer değiştirmez.
 - Cevap kontrolü `check` içinde (`ReviewSession.tsx:195`). Not verme `grade` içinde (`ReviewSession.tsx:213`). "Son cevabı geri al" `undo` içinde (`ReviewSession.tsx:235`).
-  Geri alma, son `ReviewLog` içindeki `previousCard` kopyasını geri yazar (`indexeddb.ts:969`).
+  Geri alma, son `ReviewLog` içindeki `previousCard` kopyasını geri yazar (`indexeddb.ts:1054`).

@@ -35,13 +35,13 @@ Konuşma köprüsü (`src/features/konusma/`):
 - `logic/session.ts`: Küçük saf yardımcılar: hedef kelime seçimi (`session.ts:49`), hata çubukları (`:90`).
 - `logic/sessionState.ts`: Sayfa yenilenince adımı ve yapıştırılan metni hatırlar.
 - `PrepareStep.tsx`, `TimerStep.tsx`, `ReportStep.tsx`: Üç adımın ekranları.
-- `src/data/indexeddb.ts`: `speaking.saveReport` burada (`indexeddb.ts:1166`).
+- `src/data/indexeddb.ts`: `speaking.saveReport` burada (`indexeddb.ts:1237`).
 
 İstatistik:
 
 - `src/features/istatistik/statsLogic.ts`: Ekranın sayıları nasıl göstereceğini hesaplayan saf fonksiyonlar.
 - `src/screens/IstatistikScreen.tsx`: Ekranın kendisi.
-- `src/data/indexeddb.ts`: `stats` sorguları (`indexeddb.ts:1232` satırında başlar, aşağıda).
+- `src/data/indexeddb.ts`: `stats` sorguları (`indexeddb.ts:1303` satırında başlar, aşağıda).
 - `src/data/seed/ngsl.ts` ve `src/data/seed/ngsl-1.2.json`: Sıklık listesi ve sıra bulucu.
 - `docs/lisanslar.md`: Listenin kaynağı ve lisansı.
 
@@ -65,7 +65,7 @@ Konuşma köprüsü, adım adım:
 3. Konuşma bitince yapay zeka sadece bir JSON raporu yazar. Sen onu `ReportStep.tsx` içindeki kutuya yapıştırırsın.
 4. "İşle" düğmesi `parseReport(text)` çağırır (`ReportStep.tsx:41`). Metin bozuksa kırmızı bir Türkçe hata çıkar. Hiçbir şey kaydedilmez.
 5. Metin geçerliyse `repository.speaking.saveReport` çağrılır (`ReportStep.tsx:50`).
-6. `saveReport` tek bir transaction içinde üç şey yazar: oturum kaydı, hatalar, yeni kelimeler (`indexeddb.ts:1166`).
+6. `saveReport` tek bir transaction içinde üç şey yazar: oturum kaydı, hatalar, yeni kelimeler (`indexeddb.ts:1237`).
 7. Yeni kelimeler gelen kutusuna `source: { kind: "konusma" }` ile girer. Orada normal bir kelime gibi ayıklanır.
 
 İstatistik: `src/screens/IstatistikScreen.tsx:83` içindeki `useRepoData` sekiz sorguyu birden çalıştırır
@@ -106,9 +106,9 @@ denir. TypeScript `ok` değerine bakmadan `report` alanını kullanmana izin ver
 ### Hataları ve yeni kelimeleri kaydetmek
 `saveReport` kayıtları aynı transaction içinde yazar (Faz 1'deki transaction kavramı). Bir kelime eklenirken
 sorun çıkarsa oturum ve hatalar da geri alınır. Yeni kelime boşsa, gelen kutusunda zaten bekliyorsa ya da
-zaten öğreniliyorsa atlanır ve sayılır. Sonuç `wordsAdded` ve `wordsSkipped` olarak döner (`indexeddb.ts:1219`).
+zaten öğreniliyorsa atlanır ve sayılır. Sonuç `wordsAdded` ve `wordsSkipped` olarak döner (`indexeddb.ts:1290`).
 Aynı kelime raporda iki kez geçse bile ikincisi atlanır; çünkü birincisi transaction içinde zaten görünür.
-Ham rapor da oturumla birlikte saklanır (`rawReport`, `indexeddb.ts:1177`).
+Ham rapor da oturumla birlikte saklanır (`rawReport`, `indexeddb.ts:1248`).
 
 Çift dokunmaya karşı da önlem var: aynı metin bir kez işlendikten sonra "İşle" kapanır (`ReportStep.tsx:55`
 ve `:35`). Rapor iki kez sayılmaz.
@@ -119,14 +119,14 @@ iPhone uygulamayı bellekten atabilir. `sessionState.ts` adımı, senaryoyu ve y
 
 ### İstatistik sorguları
 Her sorgu `src/data/indexeddb.ts` içindeki `stats` nesnesinde. Başlıcaları:
-- `minutesPerBlockPerDay` (`indexeddb.ts:707`): Aralıktaki her yerel gün için dört bloğun dakikası. Etkinlik yoksa sıfır döner.
+- `minutesPerBlockPerDay` (`indexeddb.ts:764`): Aralıktaki her yerel gün için dört bloğun dakikası. Etkinlik yoksa sıfır döner.
   Saniyeleri önce toplar, sonra tek kez 60'a böler; kısa oturumlar kaybolmaz.
 - `consistency`: Günlük asgariye ulaşılan gün sayısı, son 7 ve son 30 gün için.
 - `wordCounts`: Duruma göre kelime sayısı (`learning`, `known`, `ignored`).
 - `reviewSuccessRate`: Son 7 günde "good" cevapların payı. Hiç tekrar yoksa `null` döner; ekran "henüz veri yok" der.
 - `leechCount`: Sürekli unutulan kart sayısı.
-- `speakingErrorsWeekOverWeek` (`indexeddb.ts:1291`): Kategori başına bu hafta ve geçen hafta hata sayısı.
-  İçinde `errorsPerCategory` (`indexeddb.ts:688`) iki kez çalışır.
+- `speakingErrorsWeekOverWeek` (`indexeddb.ts:1362`): Kategori başına bu hafta ve geçen hafta hata sayısı.
+  İçinde `errorsPerCategory` (`indexeddb.ts:745`) iki kez çalışır.
 
 Sorgular "yerel gün" kullanır (Faz 1'deki kavram), yani gece 01:00'deki çalışma doğru güne yazılır.
 `statsLogic.ts` ise saf fonksiyonlardan oluşur: haftalık sütunlar (`:97`), ay ızgarası (`:146`), tutarlılık metni (`:159`).
@@ -138,7 +138,7 @@ göre dizilidir; 1. kelime en sık olandır. `rankOf(lemma)` bir kelimenin sıra
 (`ngsl.ts:27`). Kelime önce `normalizeWord` ile temizlenir: küçük harf, boşluk, kıvrık kesme (`ngsl.ts:28`).
 `walked` gibi çekimli bir biçim lemma değildir, bu yüzden `null` döner (`ngsl.test.ts:20-24`).
 
-`knownWordsPerNgslBand` (`indexeddb.ts:1262`) sadece "known" kelimelere bakar. Sıraya göre dört banttan birine
+`knownWordsPerNgslBand` (`indexeddb.ts:1333`) sadece "known" kelimelere bakar. Sıraya göre dört banttan birine
 koyar: `1-1000`, `1001-2000`, `2001-2809` ya da `listede yok` (`repository.ts:199`). Ekran bununla
 "çekirdek listenin ne kadarını biliyorum" sorusunu cevaplar.
 
@@ -154,35 +154,35 @@ PWA (Progressive Web App), tarayıcıda çalışan ama telefona uygulama gibi ku
 Üç parçası var: manifest, service worker ve ikonlar.
 
 ### Manifest
-`vite.config.ts:21-36` manifest ayarlarını verir. Ad `ENG-LEARN`, kısa ad `ENG`, dil `tr`,
-`display: 'standalone'` (adres çubuğu olmadan açılır). Başlangıç adresi `/#/bugun` (`vite.config.ts:26`).
+`vite.config.ts:44-59` manifest ayarlarını verir. Ad `ENG-LEARN`, kısa ad `ENG`, dil `tr`,
+`display: 'standalone'` (adres çubuğu olmadan açılır). Başlangıç adresi `/#/bugun` (`vite.config.ts:49`).
 Renkler tek yerden gelir: `GROUND` sabiti açık temanın zemin rengidir. Manifest gerçek renk ister,
 CSS değişkeni olmaz; bu yüzden değer burada tekrarlandı ve yorumda söylendi.
-İkonlardan biri `purpose: 'maskable'` (`vite.config.ts:34`). Android ikonu daire ya da kare gibi
+İkonlardan biri `purpose: 'maskable'` (`vite.config.ts:57`). Android ikonu daire ya da kare gibi
 farklı şekillere keser. Maskable ikonun kenarında güvenli boşluk vardır.
 
 ### Service worker ve Workbox önbelleği
 Derleme sırasında vite-plugin-pwa `dist/sw.js` dosyasını üretir. İçinde "precache" listesi var:
-uygulamanın JS, CSS, HTML ve görsel dosyaları (`vite.config.ts:39`). Bu dosyalar ilk ziyarette saklanır.
+uygulamanın JS, CSS, HTML ve görsel dosyaları (`vite.config.ts:62`). Bu dosyalar ilk ziyarette saklanır.
 İnternet yokken uygulama oradan açılır.
 
 Üç ayrıntı önemli:
-- **`navigateFallback: 'index.html'`** (`vite.config.ts:41`). Uygulama hash adresi kullanır (`#/okuma`).
+- **`navigateFallback: 'index.html'`** (`vite.config.ts:64`). Uygulama hash adresi kullanır (`#/okuma`).
   Her sayfa aslında aynı `index.html` dosyasıdır.
-- **Supabase asla önbelleğe alınmaz.** `runtimeCaching` listesinde Supabase yok (`vite.config.ts:61-62`
+- **Supabase asla önbelleğe alınmaz.** `runtimeCaching` listesinde Supabase yok (`vite.config.ts:84-85`
   civarındaki yorum). Eşleşen kural yoksa Workbox isteği ağa bırakır. Önbellek eski ya da başka bir
   kullanıcının verisini gösterebilirdi. Ayrıca `/rest/`, `/auth/` ve `/realtime/` yolları için
-  `index.html` yedeği kapalı (`vite.config.ts:43`).
-- **Google Fonts için `StaleWhileRevalidate`** (`vite.config.ts:48`). "Önce eskiyi göster, arkada yenisini indir"
+  `index.html` yedeği kapalı (`vite.config.ts:66`).
+- **Google Fonts için `StaleWhileRevalidate`** (`vite.config.ts:71`). "Önce eskiyi göster, arkada yenisini indir"
   demektir. Yazı tipi nadiren değişir, bu strateji yeterli.
 
 ### `registerType: 'prompt'` ve güncelleme şeridi
-İki seçenek vardı. `autoUpdate` yeni sürümü hemen devreye alırdı. Biz `prompt` seçtik (`vite.config.ts:18`).
+İki seçenek vardı. `autoUpdate` yeni sürümü hemen devreye alırdı. Biz `prompt` seçtik (`vite.config.ts:41`).
 Yeni service worker beklemeye geçer. Sen karar verene kadar eski sürüm çalışır. Sebep: tekrar
 oturumunun ortasında kod değişmesin.
 
 Akış şöyle:
-1. `injectRegister: false` (`vite.config.ts:20`): Kaydı eklenti değil biz yapıyoruz.
+1. `injectRegister: false` (`vite.config.ts:43`): Kaydı eklenti değil biz yapıyoruz.
 2. `src/main.tsx:14` `registerServiceWorker()` çağırır.
 3. `registerSW.ts:25-28`: yeni worker beklemeye geçince `onNeedRefresh` çalışır ve `updateAvailable` açılır.
 4. `usePwaUpdateAvailable` (`registerSW.ts:32`) bu bayrağı React'e verir. `useSyncExternalStore` kullanır;

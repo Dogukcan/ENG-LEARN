@@ -62,19 +62,19 @@ Açık sekme bir React state'i. Sekmeye dokununca hem state hem adres (`#/okuma`
 değişir, React de sekmeyi ona göre değiştirir. Sayfayı yenileyince açık sekme adresten okunur.
 
 ### Repository (depo) deseni
-`src/data/repository.ts:89` satırındaki `Repository` arayüzü sadece "ne yapılabilir"i söyler: kelime ekle,
-gelen kutusunu listele, süre kaydet. "Nasıl" kısmı `src/data/indexeddb.ts:120`'deki
+`src/data/repository.ts:259` satırındaki `Repository` arayüzü sadece "ne yapılabilir"i söyler: kelime ekle,
+gelen kutusunu listele, süre kaydet. "Nasıl" kısmı `src/data/indexeddb.ts:515`'deki
 `createIndexedDbRepository` fonksiyonunda. Ekranlar sadece arayüzü bilir. Bu sayede depolama yeri
 değişse de ekran kodu aynı kalır, testler de gerçek tarayıcı olmadan yazılabilir.
 
 ### IndexedDB: nesne depoları, indeksler, transaction
-IndexedDB tarayıcının içindeki veritabanıdır. `src/data/indexeddb.ts:125-143` satırlarında beş "nesne deposu"
+IndexedDB tarayıcının içindeki veritabanıdır. `src/data/indexeddb.ts:526-549` satırlarında beş "nesne deposu"
 (tablo gibi) açılıyor: `books`, `inbox`, `words`, `activity`, `settings`.
 - **İndeks**: Bir alana göre hızlı arama sağlar. `inbox` deposundaki `by-normalized` indeksi
-  (`indexeddb.ts:133`) `unique: true`; yani aynı kelime (küçük harfe çevrilmiş, boşlukları atılmış hali)
+  (`indexeddb.ts:531`) `unique: true`; yani aynı kelime (küçük harfe çevrilmiş, boşlukları atılmış hali)
   gelen kutusuna iki kez giremez. Bu kuralı veritabanının kendisi de korur.
 - **Transaction**: Birden fazla değişikliği "ya hepsi ya hiçbiri" olarak yapar. Bir kelimeyi gelen
-  kutusundan çıkarıp kelime listesine eklemek iki depoyu değiştirir (`indexeddb.ts:278`). Arada bir hata
+  kutusundan çıkarıp kelime listesine eklemek iki depoyu değiştirir (`indexeddb.ts:896`). Arada bir hata
   olursa kelime kaybolmaz ya da iki yerde birden kalmaz.
 - **Sürüm (version)**: Veritabanı yapısı değişince sürüm numarası artırılır ve `upgrade` fonksiyonu eski
   veriyi yeni yapıya taşır. Faz 2'de FSRS kart deposu eklenince sürüm 2 olacak.

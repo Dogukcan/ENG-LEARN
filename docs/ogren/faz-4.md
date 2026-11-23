@@ -52,15 +52,15 @@ Ekranlar hâlâ sadece `repository` ile konuşur. Eşitleme ekranların arkasın
 1. Bir kelime eklersin. Kayıt IndexedDB'ye yazılır. Anında görünür. İnternet gerekmez.
 2. Motor bu yerel değişikliği fark eder. 2 saniye bekler (`engine.ts:139`), çünkü art arda
    yazılan kayıtlar tek turda gitsin istiyoruz.
-3. Motor bir "tur" başlatır (`round`, `engine.ts:376`). Tur, her store için önce **push**, sonra
+3. Motor bir "tur" başlatır (`round`, `engine.ts:377`). Tur, her store için önce **push**, sonra
    **pull** yapar. Sıra `SYNC_ORDER` listesinde yazılı (`mapping.ts:91`).
-4. Push: yerelde değişen satırlar Supabase tablosuna gönderilir (`engine.ts:260`).
-5. Pull: sunucuda değişen satırlar indirilir ve yerel veritabanına işlenir (`engine.ts:327`).
-6. Başka bir cihaz bir şey değiştirirse Realtime kanalı haber verir (`engine.ts:443`).
+4. Push: yerelde değişen satırlar Supabase tablosuna gönderilir (`engine.ts:261`).
+5. Pull: sunucuda değişen satırlar indirilir ve yerel veritabanına işlenir (`engine.ts:328`).
+6. Başka bir cihaz bir şey değiştirirse Realtime kanalı haber verir (`engine.ts:444`).
    Motor 500 milisaniye sonra yeni bir tur başlatır.
 
 Motor şu durumlarda da tur başlatır: giriş yaptığında, internet geri geldiğinde (`online` olayı) ve
-uygulama sekmesi tekrar görünür olduğunda (`engine.ts:520-525`).
+uygulama sekmesi tekrar görünür olduğunda (`engine.ts:521-526`).
 
 Giriş akışı: `AccountSheet.tsx` e-postanı alır → `signInWithEmail` kodu yollar
 (`session.ts:33`) → sen kodu yazarsın → `verifyEmailCode` doğrular (`session.ts:56`) →
@@ -91,7 +91,7 @@ Kural yoksa erişim de yok. Giriş yapmamış biri hiçbir şey göremez ve değ
 Soft delete: Bir satırı gerçekten silmek yerine `deleted_at` alanına zaman yazmak.
 Gerçekten silersen diğer cihaz "bu satır silindi" bilgisini asla öğrenemez. Satır kalırsa öğrenir.
 Silinmiş satıra "mezar taşı" (tombstone) diyoruz. Yerelde bunu `tombstone` fonksiyonu yapar
-(`indexeddb.ts:431`). Örnek kullanım: gelen kutusundan kelime silme (`indexeddb.ts:818-820`).
+(`indexeddb.ts:488`). Örnek kullanım: gelen kutusundan kelime silme (`indexeddb.ts:875-877`).
 Dosyanın başındaki yorum da bunu söyler (`indexeddb.ts:20-21`).
 `updatedAt`: Satırın son değişme zamanı. Eşitleme "hangi satır yeni?" sorusunu bununla cevaplar.
 IndexedDB'de her store'da `by-updatedAt` indeksi var (`indexeddb.ts:194`). Sunucuda bu alanı bir
@@ -103,7 +103,7 @@ aynı kelimeyi tekrar eklemeni engellemez. Kural sadece yaşayan satırlara uygu
 
 ### Last write wins (son yazan kazanır)
 İki cihaz aynı satırı değiştirirse zamanı daha yeni olan kazanır. Yerelde bu karar `applyRemote`
-içinde verilir: yerel kayıt eşit ya da daha yeniyse sunucudan gelen atlanır (`indexeddb.ts:1340-1344`).
+içinde verilir: yerel kayıt eşit ya da daha yeniyse sunucudan gelen atlanır (`indexeddb.ts:1414-1418`).
 Dikkat: bu "son gönderen" demek değildir, "son değiştiren" demektir.
 Bu ayrımın neden gerektiğini bir sonraki başlıkta göreceksin.
 
@@ -116,9 +116,9 @@ eskiyse yazma geçersizdir. Bu durumda tetikleyici `return old` der ve satır ol
 (`0003_sync_safety.sql:36-38`). Gönderen, bir sonraki pull'da daha yeni satırı alır.
 
 ### Push ve pull
-- **Push**: Yerel değişiklikleri sunucuya yükler. Satırlar `upsert` ile gider (`engine.ts:285`).
+- **Push**: Yerel değişiklikleri sunucuya yükler. Satırlar `upsert` ile gider (`engine.ts:286`).
   Upsert "yoksa ekle, varsa güncelle" demektir. Büyük liste 200'lük parçalara bölünür (`engine.ts:105`).
-- **Pull**: Sunucudaki yeni satırları indirir ve `applyRemote` ile yerele işler (`engine.ts:351`).
+- **Pull**: Sunucudaki yeni satırları indirir ve `applyRemote` ile yerele işler (`engine.ts:352`).
 - Her store için ayrı iki imleç (cursor) vardır, yani "nerede kaldım" işareti:
   `push.<store>` ve `pull.<store>` (`engine.ts:217-218`). İmleçler `localStorage`'da saklanır.
 - Pull, imleçten 2 saniye geriden başlar (`PULL_OVERLAP_MS`, `engine.ts:107`). Çünkü yavaş bir
@@ -128,22 +128,22 @@ eskiyse yazma geçersizdir. Bu durumda tetikleyici `return old` der ve satır ol
 Çok satırı bir seferde çekmeyiz. 1000'erlik sayfalar çekeriz (`engine.ts:104`).
 Offset yöntemi "ilk 1000'i atla, sonrakini ver" der. Arada veri değişirse satır kaçar.
 Keyset yöntemi "şu satırdan sonrakini ver" der. Sıralama `updated_at`, sonra `id` iledir
-(`engine.ts:341-346`). `id` gerekli, çünkü tek push'taki birçok satır aynı `updated_at` değerini alır.
-Her sayfadan sonra imleç kaydedilir (`engine.ts:361`). Üçüncü sayfa hata verirse ilk ikisi kaybolmaz.
+(`engine.ts:342-347`). `id` gerekli, çünkü tek push'taki birçok satır aynı `updated_at` değerini alır.
+Her sayfadan sonra imleç kaydedilir (`engine.ts:362`). Üçüncü sayfa hata verirse ilk ikisi kaybolmaz.
 
 ### Echo (yankı)
 Pull ile gelen bir satır yerelde de "değişmiş" görünür. Motor bunu tekrar push ederse sunucu
 `updated_at` değerini yeniden artırır. Biz bunu tekrar çekeriz. Sonsuz döngü olur.
 Çözüm: Zaten sunucuda olan satırların listesi tutulur: `echoCache` (`engine.ts:189`).
-Push'ta bu satırlar atlanır (`engine.ts:274`). Bu liste `localStorage`'a kaydedilir (`engine.ts:204`),
+Push'ta bu satırlar atlanır (`engine.ts:275`). Bu liste `localStorage`'a kaydedilir (`engine.ts:204`),
 çünkü sadece bellekte tutulsaydı yeniden başlatınca boşalırdı.
 
 ### Unique çakışması (23505)
 İki cihaz çevrimdışıyken aynı kelimeyi farklı `id` ile ekleyebilir. Sunucuda "aynı kelime iki kez
 olmaz" kuralı var. İkinci push Postgres hata kodu `23505` ile reddedilir.
-Motor önce 200'lük parçayı dener. Hata satıra özgüyse satırları tek tek gönderir (`engine.ts:293-303`),
+Motor önce 200'lük parçayı dener. Hata satıra özgüyse satırları tek tek gönderir (`engine.ts:294-304`),
 böylece bir kötü satır diğer 199'u engellemez.
-Sonra `adoptServerTwin` sunucudaki ikizi bulur (`engine.ts:242`). Sunucudaki satır kazanır.
+Sonra `adoptServerTwin` sunucudaki ikizi bulur (`engine.ts:243`). Sunucudaki satır kazanır.
 Yerel ikiz mezar taşına dönüşür. Hangi sütuna bakılacağı `UNIQUE_COLUMNS` içinde yazılı (`mapping.ts:109`).
 
 ### Hesap sayfası ve kullanıcı değiştirme
@@ -151,11 +151,11 @@ Hesap butonu ve sayfası `AccountSheet.tsx` içinde (`AccountButton`, satır 25)
 çıkacağını `accountPanel` seçer (`accountView.ts:22`): kapalı, çıkış yapmış, kod gönderildi, giriş
 yapmış, bekleyen değişiklik var, hata ya da "switch".
 "Switch" durumu şöyle doğar: Bu cihazda A hesabının verisi var, sen B hesabıyla giriş yaptın.
-Motor B'nin verisini sormadan yüklemez. `setUser` bunu fark eder ve eşitlemeyi durdurur (`engine.ts:479-488`).
-Hesap sayfası sana iki seçenek sunar (`AccountSheet.tsx:306-318`):
+Motor B'nin verisini sormadan yüklemez. `setUser` bunu fark eder ve eşitlemeyi durdurur (`engine.ts:480-489`).
+Hesap sayfası sana iki seçenek sunar (`AccountSheet.tsx:306-322`):
 - **Sil**: Yerel veri silinir, B'nin verisi indirilir.
 - **Yükle**: Yerel veri B hesabına yüklenir.
-Seçim `confirmUserSwitch` çağrısıyla motora gider (`engine.ts:496`, `AccountSheet.tsx:168`).
+Seçim `confirmUserSwitch` çağrısıyla motora gider (`engine.ts:497`, `AccountSheet.tsx:168`).
 İmleçler her hesaba özel olduğu için seçimden sonra sıfırlanır (`resetCursors`, `engine.ts:208`).
 Yoksa yeni hesabın eski satırları hiç indirilmezdi.
 Not: Ayar kaydının sunucu `id` değeri artık hesabın kullanıcı kimliğidir (`mapping.ts:140-142`,
