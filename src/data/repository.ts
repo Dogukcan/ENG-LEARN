@@ -104,7 +104,7 @@ export interface ReviewQueue {
   cards: Array<{ card: Card; word: Word }>;
   /** All cards that are due, also those that did not fit into the time budget. */
   dueTotal: number;
-  /** Estimated time for the `cards` list, in minutes. */
+  /** Estimated time for the `cards` list, in minutes. The value is fractional on purpose (cards times seconds per card, divided by 60); screens must not round it themselves but call `reviewMinutes()` from `src/features/bugun/todayLogic.ts`, which shows whole minutes with a minimum of 1. */
   estimatedMinutes: number;
   /** Cards created today (local day). */
   newToday: number;
