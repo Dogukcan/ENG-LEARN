@@ -154,35 +154,35 @@ PWA (Progressive Web App), tarayıcıda çalışan ama telefona uygulama gibi ku
 Üç parçası var: manifest, service worker ve ikonlar.
 
 ### Manifest
-`vite.config.ts:44-59` manifest ayarlarını verir. Ad `ENG-LEARN`, kısa ad `ENG`, dil `tr`,
-`display: 'standalone'` (adres çubuğu olmadan açılır). Başlangıç adresi `/#/bugun` (`vite.config.ts:49`).
+`vite.config.ts:66-81` manifest ayarlarını verir. Ad `ENG-LEARN`, kısa ad `ENG`, dil `tr`,
+`display: 'standalone'` (adres çubuğu olmadan açılır). Başlangıç adresi `/#/bugun` (`vite.config.ts:71`).
 Renkler tek yerden gelir: `GROUND` sabiti açık temanın zemin rengidir. Manifest gerçek renk ister,
 CSS değişkeni olmaz; bu yüzden değer burada tekrarlandı ve yorumda söylendi.
-İkonlardan biri `purpose: 'maskable'` (`vite.config.ts:57`). Android ikonu daire ya da kare gibi
+İkonlardan biri `purpose: 'maskable'` (`vite.config.ts:79`). Android ikonu daire ya da kare gibi
 farklı şekillere keser. Maskable ikonun kenarında güvenli boşluk vardır.
 
 ### Service worker ve Workbox önbelleği
 Derleme sırasında vite-plugin-pwa `dist/sw.js` dosyasını üretir. İçinde "precache" listesi var:
-uygulamanın JS, CSS, HTML ve görsel dosyaları (`vite.config.ts:62`). Bu dosyalar ilk ziyarette saklanır.
+uygulamanın JS, CSS, HTML ve görsel dosyaları (`vite.config.ts:84`). Bu dosyalar ilk ziyarette saklanır.
 İnternet yokken uygulama oradan açılır.
 
 Üç ayrıntı önemli:
-- **`navigateFallback: 'index.html'`** (`vite.config.ts:64`). Uygulama hash adresi kullanır (`#/okuma`).
+- **`navigateFallback: 'index.html'`** (`vite.config.ts:86`). Uygulama hash adresi kullanır (`#/okuma`).
   Her sayfa aslında aynı `index.html` dosyasıdır.
-- **Supabase asla önbelleğe alınmaz.** `runtimeCaching` listesinde Supabase yok (`vite.config.ts:84-85`
+- **Supabase asla önbelleğe alınmaz.** `runtimeCaching` listesinde Supabase yok (`vite.config.ts:106-107`
   civarındaki yorum). Eşleşen kural yoksa Workbox isteği ağa bırakır. Önbellek eski ya da başka bir
   kullanıcının verisini gösterebilirdi. Ayrıca `/rest/`, `/auth/` ve `/realtime/` yolları için
-  `index.html` yedeği kapalı (`vite.config.ts:66`).
-- **Google Fonts için `StaleWhileRevalidate`** (`vite.config.ts:71`). "Önce eskiyi göster, arkada yenisini indir"
+  `index.html` yedeği kapalı (`vite.config.ts:88`).
+- **Google Fonts için `StaleWhileRevalidate`** (`vite.config.ts:93`). "Önce eskiyi göster, arkada yenisini indir"
   demektir. Yazı tipi nadiren değişir, bu strateji yeterli.
 
 ### `registerType: 'prompt'` ve güncelleme şeridi
-İki seçenek vardı. `autoUpdate` yeni sürümü hemen devreye alırdı. Biz `prompt` seçtik (`vite.config.ts:41`).
+İki seçenek vardı. `autoUpdate` yeni sürümü hemen devreye alırdı. Biz `prompt` seçtik (`vite.config.ts:63`).
 Yeni service worker beklemeye geçer. Sen karar verene kadar eski sürüm çalışır. Sebep: tekrar
 oturumunun ortasında kod değişmesin.
 
 Akış şöyle:
-1. `injectRegister: false` (`vite.config.ts:43`): Kaydı eklenti değil biz yapıyoruz.
+1. `injectRegister: false` (`vite.config.ts:65`): Kaydı eklenti değil biz yapıyoruz.
 2. `src/main.tsx:14` `registerServiceWorker()` çağırır.
 3. `registerSW.ts:25-28`: yeni worker beklemeye geçince `onNeedRefresh` çalışır ve `updateAvailable` açılır.
 4. `usePwaUpdateAvailable` (`registerSW.ts:32`) bu bayrağı React'e verir. `useSyncExternalStore` kullanır;
