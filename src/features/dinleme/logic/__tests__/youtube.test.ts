@@ -64,6 +64,40 @@ function fakeFetch(status: number, body: unknown, calls: string[] = []): FetchLi
 describe("fetchOEmbed", () => {
   const good = { title: "A talk", author_name: "Some Channel", thumbnail_url: "https://i.ytimg.com/x.jpg", extra: 1 };
 
+  it.each([
+    `https://i.ytimg.com/vi/${ID}/hqdefault.jpg`,
+  ])("keeps a trusted thumbnail: %s", async (thumbnail_url) => {
+    const result = await fetchOEmbed(watchUrl(ID), fakeFetch(200, { ...good, thumbnail_url }));
+    expect(result).toEqual({
+      ok: true,
+      info: { title: good.title, author_name: good.author_name, thumbnail_url },
+    });
+  });
+
+  it.each([
+    `http://i.ytimg.com/vi/${ID}/hqdefault.jpg`,
+    "https://evil.example/x.jpg",
+    "javascript:alert(1)",
+    "data:image/png;base64,AA",
+    "not a URL",
+    "https://evil-ytimg.com/x.jpg",
+    `https://other.ytimg.com/vi/${ID}/hqdefault.jpg`,
+    "https://i.ytimg.com.evil.example/x.jpg",
+    "https://i.ytimg.com@evil.example/x.jpg",
+    `https://i.ytimg.com:8443/vi/${ID}/hqdefault.jpg`,
+    `https://user@i.ytimg.com/vi/${ID}/hqdefault.jpg`,
+    undefined,
+    null,
+    42,
+  ])("drops an invalid or missing thumbnail without failing the lookup: %j", async (thumbnail_url) => {
+    const result = await fetchOEmbed(watchUrl(ID), fakeFetch(200, { ...good, thumbnail_url }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("Expected the title and author lookup to succeed");
+    expect(result.info.title).toBe(good.title);
+    expect(result.info.author_name).toBe(good.author_name);
+    expect(result.info.thumbnail_url).toBeUndefined();
+  });
+
   it("returns the validated info and calls the oEmbed endpoint with an encoded url", async () => {
     const calls: string[] = [];
     const result = await fetchOEmbed(`https://youtu.be/${ID}?si=abc`, fakeFetch(200, good, calls));

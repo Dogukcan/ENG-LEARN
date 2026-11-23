@@ -65,11 +65,20 @@ export function watchUrl(id: string): string {
   return `https://www.youtube.com/watch?v=${id}`;
 }
 
+function isYouTubeThumbnail(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "i.ytimg.com" && url.port === "" && url.username === "" && url.password === "";
+  } catch {
+    return false;
+  }
+}
+
 /** The parts of the oEmbed answer the app uses. Extra fields are ignored. */
 const oEmbedSchema = z.object({
   title: z.string(),
   author_name: z.string(),
-  thumbnail_url: z.string(),
+  thumbnail_url: z.string().refine(isYouTubeThumbnail).optional().catch(undefined),
 });
 
 export type OEmbedInfo = z.infer<typeof oEmbedSchema>;

@@ -9,6 +9,7 @@ import {
   LINK_ERROR_TEXT,
   MINUTES_ERROR_TEXT,
   parseMinutes,
+  thumbnailUrl,
 } from "./logic/screen.ts";
 import { fetchOEmbed, parseYouTubeId } from "./logic/youtube.ts";
 import type { OEmbedInfo } from "./logic/youtube.ts";
@@ -171,12 +172,12 @@ function LinkForm({ active, onAdded }: LinkFormProps) {
           <div className="w-40">
             {/* The tile is shown while loading and on failure; the picture appears only when the lookup gave one. */}
             <VideoThumb
-              key={lookup.state === "ok" ? lookup.info.thumbnail_url : "tile"}
+              key={lookup.state === "ok" ? lookup.info.thumbnail_url ?? thumbnailUrl(youtubeId) : "tile"}
               youtubeId={youtubeId}
               title={title.trim() || "seçilen video"}
               durationText=""
               size="full"
-              src={lookup.state === "ok" ? lookup.info.thumbnail_url : undefined}
+              src={lookup.state === "ok" ? lookup.info.thumbnail_url ?? thumbnailUrl(youtubeId) : undefined}
             />
           </div>
           <p role="status" className="text-small leading-[1.35] text-muted">
