@@ -67,7 +67,12 @@ export function PrepareStep({ scenario, onScenarioChange, targetWords }: Prepare
                 )}
               >
                 <span className="text-body leading-[1.25] font-semibold">{item.title}</span>
-                <span className="text-small font-medium">{selected ? "Seçili" : "\u00A0"}</span>
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className={cx("text-small leading-[1.3]", selected ? "text-konusma-ink" : "text-muted")}>
+                    {item.kind}
+                  </span>
+                  {selected ? <span className="text-small font-bold whitespace-nowrap">Seçili</span> : null}
+                </span>
               </button>
             );
           })}
