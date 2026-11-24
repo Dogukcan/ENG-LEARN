@@ -53,13 +53,13 @@ export function KelimeScreen() {
   function onHeroAction() {
     setReviewMessage("");
     if (timer.running === "kelime") {
-      timer.stop().catch(() => setReviewMessage("Süre kaydedilemedi. Sayaç çalışmaya devam ediyor, tekrar dene."));
+      timer.stop().catch(() => setReviewMessage("Süre kaydedilemedi. Çalışan sayaç devam ediyor, tekrar dene."));
     } else if (data && data.queue.cards.length > 0) {
       // Save the running block before review so its minutes are not counted twice.
       const stopFirst = timer.running ? timer.stop() : Promise.resolve();
       stopFirst.then(
         () => setReviewOpen(true),
-        () => setReviewMessage("Süre kaydedilemedi. Sayaç çalışmaya devam ediyor, tekrar dene."),
+        () => setReviewMessage("Süre kaydedilemedi. Çalışan sayaç devam ediyor, tekrar dene."),
       );
     } else {
       setAddOpen(true);
