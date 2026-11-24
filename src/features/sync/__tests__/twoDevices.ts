@@ -350,7 +350,7 @@ export function createSharedServer() {
   };
 }
 
-export function createDevice(server: ReturnType<typeof createSharedServer>, { skewMs = 0 } = {}) {
+export function createDevice(server: ReturnType<typeof createSharedServer>, { skewMs = 0, dbName = `eng-learn-two-devices-${crypto.randomUUID()}` } = {}) {
   let offset = skewMs;
   const now = () => new Date(server.now().getTime() + offset);
   async function run<T>(action: () => Promise<T>): Promise<T> {
@@ -362,14 +362,14 @@ export function createDevice(server: ReturnType<typeof createSharedServer>, { sk
       vi.setSystemTime(previous);
     }
   }
-  const repo = createIndexedDbRepository(`eng-learn-two-devices-${crypto.randomUUID()}`);
+  const repo = createIndexedDbRepository(dbName);
   const values = new Map<string, string>();
   const storage: SyncStorage = {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => { values.set(key, value); },
   };
   const engine = createSyncEngine({ repo, client: server.client, now: () => new Date(), storage, isOnline: () => true });
-  return { repo, engine, storage, now, run, advance: (ms: number) => { offset += ms; }, signedIn: false };
+  return { dbName, repo, engine, storage, now, run, advance: (ms: number) => { offset += ms; }, signedIn: false };
 }
 
 export function createTwoDevices(bOptions: { skewMs?: number } = {}) {

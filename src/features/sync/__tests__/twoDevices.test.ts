@@ -1,4 +1,7 @@
 import "fake-indexeddb/auto";
+import { openDB } from "idb";
+import type { SyncStore } from "../../../data/repository";
+import { SYNC_STORES } from "../../../data/repository";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TABLES, fromRemoteRow, toRemoteRow } from "../mapping";
 import type { Card } from "../../../data/types";
@@ -7,6 +10,57 @@ import { LOCAL_TIME, USER_ID, createDevice, createSharedServer, createTwoDevices
 const EPOCH = "1970-01-01T00:00:00.000Z";
 
 type Device = ReturnType<typeof createDevice>;
+
+/** Preserve a settled device as an actual v5 database, without sequence cursors or echoes. */
+async function snapshotV5(source: Device, server: ReturnType<typeof createSharedServer>, skewMs = -5000) {
+  const name = `eng-learn-v5-${crypto.randomUUID()}`;
+  const original = await openDB(source.dbName);
+  const schema = SYNC_STORES.map((store) => {
+    const os = original.transaction(store).store;
+    return { store, keyPath: os.keyPath, indexes: [...os.indexNames].filter((i) => i !== "by-localSeq").map((name) => {
+      const index = os.index(name);
+      return { name, keyPath: index.keyPath, unique: index.unique, multiEntry: index.multiEntry };
+    }) };
+  });
+  const old = await openDB(name, 5, { upgrade(db) {
+    for (const { store, keyPath, indexes } of schema) {
+      const os = db.createObjectStore(store, keyPath === null ? undefined : { keyPath });
+      for (const index of indexes) os.createIndex(index.name, index.keyPath, index);
+    }
+  } });
+  const cursors = new Map<SyncStore, string>();
+  for (const store of SYNC_STORES) {
+    const rows = await original.getAll(store);
+    const keys = await original.getAllKeys(store);
+    for (const [i, row] of rows.entries()) {
+      const legacy = { ...row };
+      delete legacy.localSeq;
+      await old.put(store, legacy, store === "settings" ? keys[i] : undefined);
+    }
+    cursors.set(store, rows.reduce((max, row) => row.updatedAt > max ? row.updatedAt : max, EPOCH));
+  }
+  original.close();
+  old.close();
+  const upgraded = createDevice(server, { dbName: name, skewMs });
+  for (const [store, cursor] of cursors) upgraded.storage.setItem(`eng-learn.sync.push.${store}`, cursor);
+  return upgraded;
+}
+
+/** Simulate unsupported local deletion/re-key operations, rather than server writes. */
+async function localFixture(device: Device, store: SyncStore, rows: Array<Record<string, unknown>>) {
+  await device.repo.sync.applyRemote(store, rows);
+  const db = await openDB(device.dbName);
+  try {
+    const tx = db.transaction(store, "readwrite");
+    for (const row of rows) {
+      const stored = await tx.store.get(row.id as string);
+      if (!stored) throw new Error("Fixture row missing");
+      const last = await tx.store.index("by-localSeq").openKeyCursor(null, "prev");
+      await tx.store.put({ ...stored, localSeq: Number(last?.key ?? 0) + 1 });
+    }
+    await tx.done;
+  } finally { db.close(); }
+}
 
 async function learn(device: Device, lemma: string, reps: number) {
   return device.run(async () => {
@@ -434,7 +488,15 @@ describe("round 9c snapshot undo", () => {
     server.advance(10000);
     // A remote word twin invokes moveCardAfterWordTwin on A's stale two-rep card.
     const [word] = await a.repo.sync.listChangedSince("words", EPOCH);
-    await a.run(() => a.repo.sync.applyRemote("words", [{ ...word, id: "surviving-word", updatedAt: a.now().toISOString() }]));
+    // The pulled twin must exist on the server, with the old unique key freed there.
+    expect((await server.client.from("eng_words").upsert([
+      toRemoteRow("words", { ...word, deletedAt: a.now().toISOString(), updatedAt: a.now().toISOString() }),
+    ], { onConflict: "id" })).error).toBeNull();
+    expect((await server.client.from("eng_words").upsert([
+      toRemoteRow("words", { ...word, id: "surviving-word", updatedAt: a.now().toISOString() }),
+    ], { onConflict: "id" })).error).toBeNull();
+    const surviving = server.tableOf("eng_words").get("surviving-word")!;
+    await a.run(() => a.repo.sync.applyRemote("words", [fromRemoteRow("words", surviving)]));
     expect(await a.repo.sync.listChangedSince("cards", EPOCH)).toMatchObject([{ wordId: "surviving-word", reps: 2 }]);
     const logIds = await reviewIds([a, b]);
     await syncRound(a);
@@ -506,7 +568,7 @@ describe("round 9c snapshot undo", () => {
     await a.run(async () => {
       for (const store of ["words", "cards", "reviewLogs"] as const) {
         const rows = await a.repo.sync.listChangedSince(store, EPOCH);
-        await a.repo.sync.applyRemote(store, rows.map((row) => ({ ...row, updatedAt: a.now().toISOString(), deletedAt: a.now().toISOString() })));
+        await localFixture(a, store, rows.map((row) => ({ ...row, updatedAt: a.now().toISOString(), deletedAt: a.now().toISOString() })));
       }
     });
     const check = async () => {
@@ -541,8 +603,8 @@ describe("two devices sharing a Supabase server", () => {
       const [word] = await a.repo.words.listByStatus("learning");
       expect(card?.reps).toBe(2);
       const at = a.now().toISOString();
-      await a.repo.sync.applyRemote("cards", [{ ...card, updatedAt: at, deletedAt: at }]);
-      await a.repo.sync.applyRemote("words", [{ ...word, updatedAt: at, deletedAt: at }]);
+      await localFixture(a, "cards", [{ ...card, updatedAt: at, deletedAt: at }]);
+      await localFixture(a, "words", [{ ...word, updatedAt: at, deletedAt: at }]);
     });
     const logIds = await reviewIds([a, b]);
     for (const device of [a, b, a]) await syncRound(device);
@@ -652,7 +714,7 @@ describe("two devices sharing a Supabase server", () => {
     expect([...server.tableOf("eng_cards").values()].filter((card) => card.deleted_at == null)).toEqual([]);
     const pending = (await b.repo.sync.listChangedSince("cards", EPOCH))[0]!;
     expect(pending.id).toBe(second.cardId);
-    expect((await b.repo.sync.listChangedSince("cards", b.storage.getItem("eng-learn.sync.push.cards") ?? EPOCH))
+    expect((await b.repo.sync.listChangedAfterSeq("cards", Number(b.storage.getItem("eng-learn.sync.pushSeq.cards") ?? 0)))
       .some((card) => card.id === pending.id)).toBe(true);
     const echoes = JSON.parse(b.storage.getItem("eng-learn.sync.echo.cards") ?? "{}");
     expect(echoes[pending.id]).not.toBe(pending.updatedAt);
@@ -733,6 +795,8 @@ describe("two devices sharing a Supabase server", () => {
     const { a, b, server } = createTwoDevices();
     const first = await learn(a, "harbor", aReps);
     const second = await learn(b, "Harbor", bReps);
+    // This scenario requires the pulled word to be newer than both local branches.
+    server.advance(10000);
     await syncRound(a);
     // A partial download can deliver the surviving word's card and logs before its word.
     await b.run(() => b.repo.sync.applyRemote("cards", [...server.tableOf("eng_cards").values()].map((row) => fromRemoteRow("cards", row))));
@@ -826,8 +890,8 @@ describe("two devices sharing a Supabase server", () => {
       const at = new Date(server.now().getTime() + 1000).toISOString();
       const [card] = await c.repo.sync.listChangedSince("cards", EPOCH);
       const [word] = await c.repo.words.listByStatus("learning");
-      await c.repo.sync.applyRemote("cards", [{ ...card, updatedAt: at, deletedAt: at }]);
-      await c.repo.sync.applyRemote("words", [{ ...word, updatedAt: at, deletedAt: at }]);
+      await localFixture(c, "cards", [{ ...card, updatedAt: at, deletedAt: at }]);
+      await localFixture(c, "words", [{ ...word, updatedAt: at, deletedAt: at }]);
     });
     await syncRound(c);
     for (const device of [b, a, c, b, a, c]) await syncRound(device);
@@ -901,11 +965,11 @@ describe("two devices sharing a Supabase server", () => {
     const second = await learn(b, "Harbor", 3);
     // Simulate a settled push cursor left by an older client; pull must make the card pending.
     const [local] = await b.repo.sync.listChangedSince("cards", EPOCH);
-    b.storage.setItem("eng-learn.sync.push.cards", local!.updatedAt);
+    b.storage.setItem("eng-learn.sync.pushSeq.cards", String((await b.repo.sync.listChangedAfterSeq("cards", 0)).find((r) => r.id === local!.id)!.localSeq));
     const [word] = await b.repo.words.listByStatus("learning");
     await b.run(() => b.repo.sync.applyRemote("words", [{ ...word, id: first.wordId, updatedAt: new Date(Date.parse(word!.updatedAt) + 10000).toISOString() }]));
     const moved = (await b.repo.sync.listChangedSince("cards", EPOCH))[0]!;
-    b.storage.setItem("eng-learn.sync.push.cards", moved.updatedAt);
+    b.storage.setItem("eng-learn.sync.pushSeq.cards", String((await b.repo.sync.listChangedAfterSeq("cards", 0)).find((r) => r.id === moved.id)!.localSeq));
     const logIds = await reviewIds([a, b]);
     await syncRound(b);
     expect((await b.repo.sync.listChangedSince("cards", EPOCH))[0]).toMatchObject({ id: second.cardId, reps: 3 });
@@ -1548,7 +1612,7 @@ it("round 9f: a logs-only redirected group resolves the canonical id through bun
   await expectSnapshotConverged([a, b], server, first.cardId, await reviewIds([a, b]), 1, [original.id], false);
   const c = createDevice(server);
   // Only this old-id log is pending: no local card row is available for the merge request.
-  await c.repo.sync.applyRemote("reviewLogs", [{ ...original, cardId: second.cardId }]);
+  await localFixture(c, "reviewLogs", [{ ...original, cardId: second.cardId }]);
   const rpc = vi.spyOn(server.client, "rpc");
   await syncRound(c);
   expect(rpc.mock.calls[0]).toMatchObject(["eng_push_card_bundle", { p_card: null }]);
@@ -1780,5 +1844,305 @@ describe.each([0, 5000, -5000])("R9I-2 synced undo then later review next to a l
     console.log(`R9I-2 skew ${skewMs}: server reps after three later reviews ${JSON.stringify(repsSeen)}; live server logs ${live}; A reps ${(await localCard(a, cardId)).reps}; B reps ${(await localCard(b, cardId)).reps}`);
     expect(repsSeen).toEqual([4, 5, 6]);
     await expectSnapshotConverged([a, b], server, cardId, await reviewIds([a, b]), 6, [la.id], false);
+  });
+});
+
+describe("round 10 D1: device clock steps back after sync", () => {
+  it.each([5000, 2000])("pushes every row and converges after a %i ms backward step", async (back) => {
+    const { a, b, server } = createTwoDevices();
+    const other = await learn(a, "other", 1);
+    const { cardId } = await learn(a, "clock", 2);
+    server.advance(60000);
+    await reviewMore(a, other.cardId, 1);
+    await syncRound(a);
+    await syncRound(b);
+
+    a.advance(-back);
+    await reviewMore(a, cardId, 1);
+    const third = (await a.repo.sync.listChangedSince("reviewLogs", EPOCH)).find((row) =>
+      row.cardId === cardId && (row.previousCard as Card).reps === 2)!;
+    expect((await a.repo.sync.listChangedAfterSeq("reviewLogs", Number(a.storage.getItem("eng-learn.sync.pushSeq.reviewLogs") ?? 0))).some((row) => row.id === third.id)).toBe(true);
+
+    const converge = async () => {
+      for (const device of [a, b, a, b]) await syncRound(device);
+      // Every row (including tombstones) reaches the server, and both devices agree.
+      for (const [store, spec] of Object.entries(TABLES)) {
+        const rowsA = await a.repo.sync.listChangedSince(store as keyof typeof TABLES, EPOCH);
+        const rowsB = await b.repo.sync.listChangedSince(store as keyof typeof TABLES, EPOCH);
+        const byId = (rows: typeof rowsA) => rows.sort((x, y) => x.id.localeCompare(y.id));
+        expect(byId(rowsA)).toEqual(byId(rowsB));
+        for (const row of rowsA) expect(server.tableOf(spec.table).has(row.id)).toBe(true);
+      }
+    };
+    await converge();
+    expect(server.tableOf("eng_review_logs").has(third.id)).toBe(true);
+    expect(server.tableOf("eng_cards").get(cardId)?.reps).toBe(3);
+    const repsSeen: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      server.advance(60000);
+      await reviewMore(i % 2 ? b : a, cardId, 1);
+      await converge();
+      repsSeen.push(Number(server.tableOf("eng_cards").get(cardId)?.reps));
+    }
+    expect(repsSeen).toEqual([4, 5, 6]);
+  });
+});
+
+
+describe("round 10b sequence cursors", () => {
+  it("pushes alternating edits from two repositories sharing a database after clock steps back", async () => {
+    const server = createSharedServer();
+    const a = createDevice(server);
+    const b = createDevice(server, { dbName: a.dbName });
+    const ids: string[] = [];
+    for (const [device, back] of [[a, 0], [b, -5000], [a, -2000], [b, -5000]] as const) {
+      device.advance(back);
+      const row = await device.run(() => device.repo.books.upsert({ title: "Local", shortName: "L", unit: 1, page: 1 }));
+      ids.push(row.id);
+      await syncRound(device);
+    }
+    for (const device of [a, b, a]) await syncRound(device);
+    for (const id of ids) expect(server.tableOf("eng_books").has(id)).toBe(true);
+    for (const device of [a, b]) {
+      expect(device.engine.getState().pendingCount).toBe(0);
+      const cursor = Number(device.storage.getItem("eng-learn.sync.pushSeq.books"));
+      expect(await device.repo.sync.listChangedAfterSeq("books", cursor)).toEqual([]);
+    }
+  });
+
+  it("leaves a rollback edit made during an upsert pending until the next snapshot", async () => {
+    const { a, server } = createTwoDevices();
+    await a.run(() => a.repo.books.upsert({ title: "First", shortName: "F", unit: 1, page: 1 }));
+    const from = server.client.from.bind(server.client);
+    let concurrentId = "";
+    const spy = vi.spyOn(server.client, "from").mockImplementation((table) => {
+      const query = from(table);
+      const upsert = query.upsert.bind(query);
+      if (table === "eng_books") query.upsert = async (rows, options) => {
+        if (!concurrentId) {
+          a.advance(-5000);
+          const next = await a.run(() => a.repo.books.upsert({ title: "During push", shortName: "D", unit: 1, page: 1 }));
+          concurrentId = next.id;
+        }
+        return upsert(rows, options);
+      };
+      return query;
+    });
+    try {
+      await syncRound(a);
+      expect(server.tableOf("eng_books").has(concurrentId)).toBe(false);
+      await new Promise<void>((resolve) => {
+        if (a.engine.getState().pendingCount === 1) { resolve(); return; }
+        const unsubscribe = a.engine.subscribe(() => {
+          if (a.engine.getState().pendingCount === 1) { unsubscribe(); resolve(); }
+        });
+      });
+      expect(a.engine.getState().pendingCount).toBe(1);
+      await syncRound(a);
+      expect(server.tableOf("eng_books").has(concurrentId)).toBe(true);
+      expect(a.engine.getState().pendingCount).toBe(0);
+    } finally { spy.mockRestore(); }
+  });
+
+  it("accepts equal client timestamps and idempotent plain-upsert retries like migration 0003", async () => {
+    const server = createSharedServer();
+    const at = server.now().toISOString();
+    const payload = toRemoteRow("books", { id: "same-client", title: "Local", shortName: "L", unit: 1, page: 1, updatedAt: at });
+    const push = (row: typeof payload) => server.client.from("eng_books").upsert([row], { onConflict: "id" });
+    expect((await push(payload)).error).toBeNull();
+    // Equal to OLD.updated_at passes the strict '<' guard and receives server time.
+    expect((await push({ ...payload, page: 2 })).error).toBeNull();
+    const saved = structuredClone(server.tableOf("eng_books").get("same-client"));
+    expect(saved?.page).toBe(2);
+    // The same client timestamp is now below OLD.updated_at: RETURN OLD still succeeds.
+    expect((await push({ ...payload, page: 3 })).error).toBeNull();
+    expect(server.tableOf("eng_books").get("same-client")).toEqual(saved);
+  });
+
+  it.each(["tombstone", "live"] as const)("does not replay a settled v5 %s over another device's newer state", async (kind) => {
+    const { a, b, server } = createTwoDevices();
+    const { cardId } = await learn(a, "upgrade-no-replay", 1);
+    await syncRound(a);
+    await syncRound(b);
+    const cardOf = async (device: Device) => (await device.repo.sync.listChangedSince("cards", EPOCH)).find((r) => r.id === cardId)!;
+    if (kind === "tombstone") {
+      server.advance(10000);
+      const at = a.now().toISOString();
+      await localFixture(a, "cards", [{ ...await cardOf(a), updatedAt: at, deletedAt: at }]);
+      await syncRound(a);
+      await syncRound(b);
+    }
+    const upgraded = await snapshotV5(a, server);
+    server.advance(10000);
+    const at = b.now().toISOString();
+    await localFixture(b, "cards", [{ ...await cardOf(b), updatedAt: at, deletedAt: kind === "live" ? at : null }]);
+    if (kind === "tombstone") await reviewMore(b, cardId, 1);
+    await syncRound(b);
+    const newer = structuredClone(server.tableOf("eng_cards").get(cardId));
+    const logs = structuredClone([...server.tableOf("eng_review_logs").values()]);
+    await syncRound(upgraded);
+    await syncRound(b);
+    expect(server.tableOf("eng_cards").get(cardId)).toEqual(newer);
+    expect([...server.tableOf("eng_review_logs").values()]).toEqual(logs);
+    for (const device of [upgraded, b]) {
+      const card = await cardOf(device);
+      expect(Boolean(card.deletedAt)).toBe(kind === "live");
+      expect(card.reps).toBe(kind === "tombstone" ? 2 : 1);
+      expect(device.engine.getState().pendingCount).toBe(0);
+    }
+  });
+
+  it("pushes edits after the old timestamp cursor made before upgrading", async () => {
+    const { a, b, server } = createTwoDevices();
+    const first = await a.run(() => a.repo.books.upsert({ title: "Settled", shortName: "S", unit: 1, page: 1 }));
+    await syncRound(a);
+    const settled = (await a.repo.sync.listChangedSince("books", EPOCH)).find((r) => r.id === first.id)!;
+    server.advance(10000);
+    const pending = await a.run(() => a.repo.books.upsert({ title: "Pending", shortName: "P", unit: 1, page: 7 }));
+    const upgraded = await snapshotV5(a, server);
+    upgraded.storage.setItem("eng-learn.sync.push.books", settled.updatedAt);
+    const pendingSeq = (await upgraded.repo.sync.listChangedAfterSeq("books", 0)).find((r) => r.id === pending.id)!.localSeq;
+    await syncRound(upgraded);
+    await syncRound(b);
+    expect(server.tableOf("eng_books").get(pending.id)?.page).toBe(7);
+    expect((await b.repo.books.list()).some((r) => r.id === pending.id)).toBe(true);
+    expect(Number(upgraded.storage.getItem("eng-learn.sync.pushSeq.books"))).toBe(pendingSeq);
+    expect(upgraded.engine.getState().pendingCount).toBe(0);
+  });
+
+  it.each(["behind", "normal", "no cursor"] as const)("pushes edits made before lazy conversion: %s", async (clock) => {
+    const { a, b, server } = createTwoDevices();
+    const first = await a.run(() => a.repo.books.upsert({ title: "Settled", shortName: "S", unit: 1, page: 1 }));
+    await syncRound(a);
+    const settled = (await a.repo.sync.listChangedSince("books", EPOCH)).find((r) => r.id === first.id)!;
+    server.advance(10000);
+    const pending = await a.run(() => a.repo.books.upsert({ title: "Pending", shortName: "P", unit: 1, page: 7 }));
+    const snapshot = await snapshotV5(a, server);
+    // Empty storage models a device which has never pushed this store.
+    const upgraded = clock === "no cursor" ? createDevice(server, { dbName: snapshot.dbName }) : snapshot;
+    if (clock !== "no cursor") upgraded.storage.setItem("eng-learn.sync.push.books", settled.updatedAt);
+    if (clock === "behind") upgraded.advance(-60000);
+    const offline = await upgraded.run(() => upgraded.repo.books.upsert({ title: "Offline", shortName: "O", unit: 1, page: 3 }));
+    if (clock === "behind") expect(offline.updatedAt < settled.updatedAt).toBe(true);
+    else expect(offline.updatedAt > settled.updatedAt).toBe(true);
+    const boundary = clock === "no cursor" ? 0 : Math.min(
+      await upgraded.repo.sync.maxLocalSeqThrough("books", settled.updatedAt),
+      (await upgraded.repo.sync.upgradeMaxLocalSeq("books"))!,
+    );
+    const settledSeq = (await upgraded.repo.sync.listChangedAfterSeq("books", 0)).find((r) => r.id === first.id)!.localSeq!;
+    expect(boundary).toBe(clock === "no cursor" ? 0 : settledSeq);
+    const queued = await upgraded.repo.sync.listChangedAfterSeq("books", boundary);
+    expect(queued.map((r) => r.id)).toContain(pending.id);
+    expect(queued.map((r) => r.id)).toContain(offline.id);
+    expect(queued.map((r) => r.id).includes(first.id)).toBe(clock === "no cursor");
+    await syncRound(upgraded);
+    await syncRound(upgraded);
+    await syncRound(b);
+    for (const row of [pending, offline]) {
+      expect(server.tableOf("eng_books").get(row.id)?.page).toBe(row.page);
+      expect((await b.repo.books.list()).some((r) => r.id === row.id)).toBe(true);
+    }
+    expect(upgraded.engine.getState().pendingCount).toBe(0);
+  });
+
+  it("pushes a settled upgrade row edited later and converts to the highest remaining settled sequence", async () => {
+    const { a, b, server } = createTwoDevices();
+    const first = await a.run(() => a.repo.books.upsert({ title: "Settled first", shortName: "S1", unit: 1, page: 1 }));
+    await syncRound(a);
+    server.advance(10000);
+    const last = await a.run(() => a.repo.books.upsert({ title: "Settled last", shortName: "S2", unit: 1, page: 2 }));
+    await syncRound(a);
+    const oldCursor = (await a.repo.sync.listChangedSince("books", EPOCH)).find((r) => r.id === last.id)!.updatedAt;
+    const upgraded = await snapshotV5(a, server, -60000);
+    upgraded.storage.setItem("eng-learn.sync.push.books", oldCursor);
+    const before = await upgraded.repo.sync.listChangedAfterSeq("books", 0);
+    const remainingSeq = before.find((r) => r.id === first.id)!.localSeq!;
+    const editedSeq = before.find((r) => r.id === last.id)!.localSeq!;
+    expect(editedSeq).toBeGreaterThan(remainingSeq);
+    const upgradeMax = (await upgraded.repo.sync.upgradeMaxLocalSeq("books"))!;
+    await upgraded.run(() => upgraded.repo.books.setPosition(last.id, { unit: 2, page: 9 }));
+    const boundary = await upgraded.repo.sync.maxLocalSeqThrough("books", oldCursor);
+    expect(boundary).toBe(remainingSeq);
+    const queued = await upgraded.repo.sync.listChangedAfterSeq("books", boundary);
+    expect(queued.map((r) => r.id)).toEqual([last.id]);
+    expect(queued[0]!.localSeq).toBeGreaterThan(upgradeMax);
+    await syncRound(upgraded);
+    await syncRound(b);
+    expect(server.tableOf("eng_books").get(last.id)?.page).toBe(9);
+    expect((await b.repo.books.list()).find((r) => r.id === last.id)?.page).toBe(9);
+    expect(upgraded.engine.getState().pendingCount).toBe(0);
+  });
+
+  it.each([-5000, 0])("pushes a learned word, review and inbox item before the first upgraded sync with clock offset %i", async (skewMs) => {
+    // Ported from the independent review's v5 snapshot/clock rollback scenario.
+    const { a, server } = createTwoDevices();
+    await learn(a, "clockback", 1);
+    await learn(a, "fresh", 0);
+    await syncRound(a);
+    server.advance(1000);
+    const upgraded = await snapshotV5(a, server, skewMs);
+    for (const store of SYNC_STORES) {
+      const echo = a.storage.getItem(`eng-learn.sync.echo.${store}`);
+      if (echo) upgraded.storage.setItem(`eng-learn.sync.echo.${store}`, echo);
+    }
+    const oldCursor = upgraded.storage.getItem("eng-learn.sync.push.reviewLogs")!;
+    if (skewMs < 0) {
+      upgraded.advance(Date.parse(oldCursor) + skewMs - upgraded.now().getTime());
+      expect(upgraded.now().getTime()).toBe(Date.parse(oldCursor) - 5000);
+    }
+    // Opening the repository upgrades it; no engine cursor has been converted yet.
+    const fresh = await learn(upgraded, "newonupgraded", 1);
+    await upgraded.run(async () => {
+      expect((await upgraded.repo.inbox.add({ word: "afterupgrade", source: { kind: "diger" } })).ok).toBe(true);
+    });
+    const newRows = new Map<SyncStore, Awaited<ReturnType<typeof upgraded.repo.sync.listChangedAfterSeq>>>();
+    for (const store of SYNC_STORES) {
+      expect(upgraded.storage.getItem(`eng-learn.sync.pushSeq.${store}`)).toBeNull();
+      const boundary = await upgraded.repo.sync.upgradeMaxLocalSeq(store);
+      expect(boundary).not.toBeNull();
+      newRows.set(store, await upgraded.repo.sync.listChangedAfterSeq(store, boundary!));
+    }
+    for (const store of ["words", "cards", "reviewLogs", "inbox"] as const) {
+      expect(newRows.get(store)!.length, store).toBeGreaterThan(0);
+      for (const row of newRows.get(store)!) {
+        expect(row.updatedAt <= upgraded.storage.getItem(`eng-learn.sync.push.${store}`)!, store).toBe(skewMs < 0);
+      }
+    }
+    await syncRound(upgraded);
+    await syncRound(upgraded);
+    for (const [store, rows] of newRows) {
+      for (const row of rows) expect(server.tableOf(TABLES[store].table).has(row.id), `${store}:${row.id}`).toBe(true);
+    }
+    expect(server.tableOf("eng_words").has(fresh.wordId)).toBe(true);
+    expect(server.tableOf("eng_cards").get(fresh.cardId)?.reps).toBe(1);
+    expect(upgraded.engine.getState().pendingCount).toBe(0);
+  });
+
+  it("starts a fresh v6 database at zero when only a legacy timestamp cursor exists", async () => {
+    const { a, server } = createTwoDevices();
+    const row = await a.run(() => a.repo.books.upsert({ title: "Fresh", shortName: "F", unit: 1, page: 1 }));
+    a.storage.setItem("eng-learn.sync.push.books", "2099-01-01T00:00:00.000Z");
+    expect(await a.repo.sync.upgradeMaxLocalSeq("books")).toBeNull();
+    await syncRound(a);
+    expect(server.tableOf("eng_books").has(row.id)).toBe(true);
+    expect(a.engine.getState().pendingCount).toBe(0);
+  });
+
+  it("preserves timestamp-era echoes even without a sequence or timestamp cursor", async () => {
+    const { a, server } = createTwoDevices();
+    const row = await a.run(() => a.repo.books.upsert({ title: "Echo", shortName: "E", unit: 1, page: 1 }));
+    a.storage.setItem("eng-learn.sync.echo.books", JSON.stringify({ [row.id]: row.updatedAt }));
+    await syncRound(a);
+    expect(server.tableOf("eng_books").has(row.id)).toBe(false);
+    expect(a.engine.getState().pendingCount).toBe(0);
+  });
+
+  it("uses an existing sequence cursor ahead of a legacy timestamp cursor", async () => {
+    const { a, server } = createTwoDevices();
+    const row = await a.run(() => a.repo.books.upsert({ title: "Pending", shortName: "P", unit: 1, page: 1 }));
+    a.storage.setItem("eng-learn.sync.pushSeq.books", "0");
+    a.storage.setItem("eng-learn.sync.push.books", "2099-01-01T00:00:00.000Z");
+    await syncRound(a);
+    expect(server.tableOf("eng_books").has(row.id)).toBe(true);
   });
 });
