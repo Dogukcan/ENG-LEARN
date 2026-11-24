@@ -1,0 +1,38 @@
+.skill-hero { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start; background: var(--surface); color: var(--text); border: 1.5px solid var(--border); border-radius: var(--radius-card); padding: 16px; box-shadow: 0 4px 0 var(--border); }
+.skill-hero-ring-wrap { position: relative; padding-top: 52px; }
+.skill-hero-ring { position: relative; display: flex; align-items: center; justify-content: center; width: 116px; height: 116px; border-radius: 50%; }
+.skill-hero-ring-face { position: absolute; inset: 0; border-radius: 50%; background: var(--surface); box-shadow: 0 7px 0 var(--skill-mark), 0 12px 24px color-mix(in srgb, var(--text) 8%, transparent); }
+.skill-hero-ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.skill-hero-ring-svg circle { fill: none; stroke-width: 8px; }
+.skill-hero-track { stroke: color-mix(in srgb, var(--track-empty) 30%, var(--surface)); }
+.skill-hero-progress { stroke: var(--skill-mark); stroke-linecap: round; }
+.skill-hero-disc, .skill-mini-ring-disc { position: relative; display: flex; align-items: center; justify-content: center; width: 80px; height: 80px; border-radius: 50%; border: 2px solid var(--skill-mark); background: var(--skill-tile); color: var(--skill-ink); box-shadow: 0 6px 0 var(--skill-mark); transform: translateY(-3px); }
+.skill-hero-disc { transition: transform 90ms ease, box-shadow 90ms ease; }
+.skill-hero-ring:active .skill-hero-disc { transform: translateY(3px); box-shadow: none; }
+.skill-hero-disc svg { width: 35px; height: 35px; }
+.skill-hero-check { position: absolute; bottom: 2px; right: 2px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--surface); background: var(--positive); color: var(--ground); }
+.skill-hero-check svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
+.skill-hero-bubble { position: absolute; z-index: 1; top: 0; left: 50%; transform: translateX(-50%); min-height: 44px; width: max-content; max-width: 180px; padding: calc(var(--gap) / 4) calc(var(--gap) / 2); white-space: normal; overflow-wrap: anywhere; background: var(--skill-button); color: var(--skill-button-text); box-shadow: 0 4px 0 var(--skill-button-edge); border-radius: var(--radius-control); font-size: var(--fs-small); font-weight: 700; }
+.skill-hero-bubble::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border: 6px solid transparent; border-top-color: var(--skill-button); }
+.skill-hero-bubble.can-pulse { animation: skill-hero-pulse 3s ease-in-out infinite; }
+.skill-hero-bubble:active { transform: translateX(-50%) translateY(4px); box-shadow: none; animation: none; }
+.skill-hero-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-top: 24px; overflow-wrap: anywhere; }
+.skill-hero-kicker { font-size: var(--fs-small); color: var(--muted); font-weight: 600; }
+.skill-hero-title { font-size: var(--fs-section); font-weight: 800; }
+.skill-hero-subtitle { font-size: var(--fs-small); color: var(--muted); }
+.skill-hero-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.skill-hero-chip { border: 1.5px solid var(--border); background: var(--raised); font-size: var(--fs-small); font-weight: 700; border-radius: 999px; padding: 4px 10px; min-width: 0; }
+.skill-hero-ring:focus-visible, .skill-hero-bubble:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.skill-mini-ring { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text); }
+.skill-mini-ring-face { position: relative; display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; border-radius: 50%; background: var(--surface); box-shadow: 0 4px 0 var(--skill-mark); }
+.skill-mini-ring-face > svg { position: absolute; inset: 0; }
+.skill-mini-ring-face circle { stroke-width: 6px; }
+.skill-mini-ring-disc { width: 48px; height: 48px; box-shadow: 0 4px 0 var(--skill-mark); }
+.skill-mini-ring-disc svg { width: 22px; height: 22px; }
+.skill-mini-ring-name { font-size: var(--fs-small); font-weight: 800; }
+.skill-mini-ring-min { font-size: var(--fs-small); color: var(--muted); }
+@keyframes skill-hero-pulse { 50% { transform: translateX(-50%) translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) {
+  .skill-hero-bubble.can-pulse { animation: none; }
+  .skill-hero-disc { transition: none; }
+}
