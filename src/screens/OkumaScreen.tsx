@@ -1,19 +1,25 @@
-import { LoadError } from "../components/ui/index.ts";
+import { useState } from "react";
+import { LiveRegion, LoadError } from "../components/ui/index.ts";
 import { useRepoData } from "../data/react";
 import { BookPanel } from "../features/okuma/BookPanel.tsx";
 import { CapturePanel } from "../features/okuma/CapturePanel.tsx";
 import { CapturedToday } from "../features/okuma/CapturedToday.tsx";
-import { capturedToday, doneMinutes, titleProgress } from "../features/okuma/logic.ts";
+import { bookSubtitle, capturedToday, doneMinutes } from "../features/okuma/logic.ts";
+import { SkillHero } from "../features/skill/SkillHero.tsx";
+import { heroRemaining } from "../features/skill/heroLogic.ts";
+import { formatMMSS } from "../features/timer/timerMath.ts";
 import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
 import { useTimer } from "../features/timer/TimerProvider.tsx";
 import { toLocalDay } from "../data";
 
 /**
- * Okuma screen (draft D). This component loads the data and arranges the pieces;
+ * Okuma screen. This component loads the data and arranges the pieces;
  * the pieces and the pure rules live in src/features/okuma.
  */
 export function OkumaScreen() {
-  const { running, elapsedSeconds } = useTimer();
+  const timer = useTimer();
+  const { running, elapsedSeconds } = timer;
+  const [message, setMessage] = useState("");
 
   // Reloaded by useRepoData after every repository write: a saved word, a page step, a stopped timer.
   const { data, error, reload } = useRepoData(async (repo) => {
@@ -40,12 +46,27 @@ export function OkumaScreen() {
         <h1 id="okuma-screen-title" className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">
           Okuma
         </h1>
-        {data ? (
-          <span className="text-body font-semibold whitespace-nowrap text-text tabular-nums">
-            {titleProgress(done, data.plan)}
-          </span>
-        ) : null}
       </header>
+
+      {data ? (
+        <SkillHero
+          block="okuma"
+          doneMinutes={done}
+          planMinutes={data.plan}
+          runningSeconds={running === "okuma" ? elapsedSeconds : null}
+          title="Okuma"
+          subtitle={data.activeBook ? bookSubtitle(data.activeBook) : ""}
+          chips={[heroRemaining(done, data.plan)]}
+          actionLabel={running === "okuma" ? `Durdur · ${formatMMSS(elapsedSeconds)}` : "Okumayı başlat"}
+          actionAriaLabel={running === "okuma" ? "Okuma sayacını durdur" : "Okuma sayacını başlat"}
+          onAction={() => {
+            setMessage("");
+            void timer.toggle("okuma").catch(() => setMessage("Süre kaydedilemedi. Tekrar dene."));
+          }}
+          detail={<p>Sayaç başlayınca süre kendiliğinden kaydedilir. Durdurunca tam dakika olarak eklenir.</p>}
+        />
+      ) : null}
+      <LiveRegion visible>{message}</LiveRegion>
 
       {!data && error ? <LoadError onRetry={reload} /> : null}
 

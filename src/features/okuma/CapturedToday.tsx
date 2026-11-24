@@ -8,7 +8,7 @@ export function CapturedToday({ rows }: { rows: readonly CapturedRow[] }) {
       <h2 id="okuma-captured-heading" className="text-section leading-[1.25] font-semibold text-text">
         Bugün yakalananlar
       </h2>
-      <Panel padding="none" clip>
+      <Panel tactile padding="none" clip>
         {rows.length === 0 ? (
           <p className="p-4 text-small text-muted">Bugün henüz kelime yakalamadın.</p>
         ) : (
@@ -16,10 +16,10 @@ export function CapturedToday({ rows }: { rows: readonly CapturedRow[] }) {
             {rows.map((row) => (
               <li
                 key={row.id}
-                className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5 not-first:border-t not-first:border-rule"
+                className="flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2.5 not-first:border-t not-first:border-rule"
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="text-body leading-[1.25] font-semibold text-text">{row.word}</span>
+                  <span className="text-body leading-[1.25] break-words font-semibold text-text">{row.word}</span>
                   {row.sentence ? (
                     <span className="text-small leading-[1.35] break-words text-muted">{row.sentence}</span>
                   ) : null}

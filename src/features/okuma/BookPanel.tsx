@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { Button, Panel, SegmentedControl } from "../../components/ui/index.ts";
+import { useEffect, useRef } from "react";
+import { Panel, SegmentedControl } from "../../components/ui/index.ts";
 import type { SegmentedOption } from "../../components/ui/index.ts";
 import { repository } from "../../data";
 import type { Book } from "../../data";
-import { useTimer } from "../timer/TimerProvider.tsx";
-import { formatClock, stepValue } from "./logic.ts";
+import { stepValue } from "./logic.ts";
 import { Stepper } from "./Stepper.tsx";
 
 export interface BookPanelProps {
@@ -12,24 +11,8 @@ export interface BookPanelProps {
   activeBook: Book;
 }
 
-/**
- * Book switch, current book panel (tile, title, position, steppers) and the reading timer button.
- */
+/** Book switch and position controls; queued writes preserve rapid page steps. */
 export function BookPanel({ books, activeBook }: BookPanelProps) {
-  const { running, elapsedSeconds, toggle } = useTimer();
-  const reading = running === "okuma";
-  const [timerFailure, setTimerFailure] = useState("");
-
-  // TimerProvider keeps the timer running when the save fails and rethrows so the caller can say so.
-  async function onToggleTimer() {
-    setTimerFailure("");
-    try {
-      await toggle("okuma");
-    } catch {
-      setTimerFailure("Süre kaydedilemedi. Sayaç çalışmaya devam ediyor, Durdur'a tekrar bas.");
-    }
-  }
-
   const options: Array<SegmentedOption<string>> = books.map((book) => ({ value: book.id, label: book.shortName }));
 
   // Fast taps on + must not lose steps. Each tap reads the position from `latest` (updated at once),
@@ -64,49 +47,27 @@ export function BookPanel({ books, activeBook }: BookPanelProps) {
 
   return (
     <>
-      <SegmentedControl
-        aria-label="Kitap seçimi"
-        options={options}
-        value={activeBook.id}
-        onChange={(bookId) => {
-          void repository.settings.update({ activeBookId: bookId });
-        }}
-      />
-
-      <Panel padding="sm" className="flex flex-col gap-3.5">
-        <div className="flex items-center gap-3">
-          <span
-            role="img"
-            aria-label={activeBook.title}
-            className="flex h-16 w-11 shrink-0 items-center justify-center rounded-[5px] border border-okuma-tile-border bg-okuma-tile text-small font-semibold text-okuma-ink"
-          >
-            {activeBook.shortName}
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <h2 className="text-body leading-[1.25] font-semibold text-text">{activeBook.title}</h2>
-            <p className="text-small leading-[1.3] text-muted">
-              Ünite {activeBook.unit} · sayfa {activeBook.page}
-            </p>
-          </div>
+      <Panel tactile as="section" padding="sm" aria-labelledby="okuma-book-heading" className="flex flex-col gap-3.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="okuma-book-heading" className="text-section font-semibold text-text">Kitap</h2>
+          <span className="text-small text-muted">Basılı kitabın yanında</span>
         </div>
-        <div className="flex flex-col gap-2 border-t border-rule pt-3">
-          <Stepper label="Sayfa" value={activeBook.page} onStep={(delta) => step("page", delta)} />
-          <Stepper label="Ünite" value={activeBook.unit} onStep={(delta) => step("unit", delta)} />
-        </div>
+        <SegmentedControl
+          aria-label="Kitap seçimi"
+          options={options}
+          value={activeBook.id}
+          className="border-border bg-raised [&_button]:active:translate-y-0.5 [&_button]:active:shadow-none [&_button]:transition-[translate,box-shadow] [&_button[aria-checked=true]]:shadow-[0_3px_0_var(--border)]"
+          onChange={(bookId) => {
+            void repository.settings.update({ activeBookId: bookId });
+          }}
+        />
       </Panel>
 
-      <Button
-        variant="primary-block"
-        block="okuma"
-        aria-pressed={reading}
-        className={reading ? "tabular-nums" : undefined}
-        onClick={onToggleTimer}
-      >
-        {reading ? `${formatClock(elapsedSeconds)} · Durdur` : "Okumaya başla"}
-      </Button>
-      <p role="alert" className="text-small font-medium text-negative empty:hidden">
-        {timerFailure}
-      </p>
+      <Panel tactile as="section" padding="sm" aria-labelledby="okuma-position-heading" className="flex flex-col gap-3.5">
+        <h2 id="okuma-position-heading" className="text-section font-semibold text-text">Kaldığın yer</h2>
+        <Stepper label="Ünite" value={activeBook.unit} onStep={(delta) => step("unit", delta)} />
+        <Stepper label="Sayfa" value={activeBook.page} onStep={(delta) => step("page", delta)} />
+      </Panel>
     </>
   );
 }

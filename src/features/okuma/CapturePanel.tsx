@@ -55,7 +55,7 @@ export function CapturePanel({ book }: { book: Book }) {
   }
 
   return (
-    <Panel as="section" padding="sm" aria-labelledby="okuma-capture-heading">
+    <Panel tactile as="section" padding="sm" aria-labelledby="okuma-capture-heading">
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3">
         <h2 id="okuma-capture-heading" className="text-section leading-[1.25] font-semibold text-text">
           Kelime yakala
@@ -84,7 +84,7 @@ export function CapturePanel({ book }: { book: Book }) {
         <p className="text-small leading-[1.35] text-muted">
           Sayfanın fotoğrafını çek, Canlı Metin ile cümleyi kopyala ve buraya yapıştır.
         </p>
-        <Button type="submit" variant="neutral" className="bg-control">
+        <Button tactile type="submit" variant="primary-block" block="okuma">
           Kaydet
         </Button>
         <LiveRegion visible>{liveMessage}</LiveRegion>

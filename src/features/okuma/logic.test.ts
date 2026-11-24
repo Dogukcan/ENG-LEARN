@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { Book, InboxItem } from "../../data";
-import { bookSourceLine, capturedToday, doneMinutes, formatClock, stepValue, titleProgress } from "./logic";
+import { bookSourceLine, bookSubtitle, capturedToday, doneMinutes, formatClock, stepValue, titleProgress } from "./logic";
 
 const books: Book[] = [
   { id: "b1", title: "Reader at Work 1", shortName: "RW1", unit: 3, page: 42, updatedAt: "2026-11-17T12:00:00.000Z" },
 ];
+
+describe("bookSubtitle", () => {
+  it("uses the active book title and current saved position", () => {
+    expect(bookSubtitle(books[0])).toBe("Reader at Work 1 · Ünite 3 · sayfa 42");
+    expect(bookSubtitle({ title: "Reader at Work 2", unit: 1, page: 1234 }))
+      .toBe("Reader at Work 2 · Ünite 1 · sayfa 1234");
+  });
+});
 
 function item(id: string, createdAt: string, source: InboxItem["source"], sentence?: string): InboxItem {
   return { id, word: id, createdAt, updatedAt: createdAt, source, ...(sentence ? { sentence } : {}) };

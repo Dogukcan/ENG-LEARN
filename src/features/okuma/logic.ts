@@ -7,6 +7,11 @@ import type { Book, CaptureSource, InboxItem } from "../../data";
 // A non-breaking space keeps "12 / 35 dk" on one line instead of wrapping in the middle.
 const NBSP = "\u00A0";
 
+/** The active book and its saved reading position for the skill hero. */
+export function bookSubtitle(book: Pick<Book, "title" | "unit" | "page">): string {
+  return `${book.title} · Ünite ${book.unit} · sayfa ${book.page}`;
+}
+
 /** Page and unit numbers are 1-based, so a minus tap on 1 stays on 1 instead of reaching 0. */
 export function stepValue(current: number, delta: 1 | -1): number {
   return Math.max(1, current + delta);
