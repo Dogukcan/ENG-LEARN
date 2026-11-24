@@ -108,10 +108,10 @@ export function IstatistikScreen() {
 
   const header = (
     <>
-      <Button tactile variant="neutral"
+      <Button variant="text"
         onClick={goBack}
         aria-label="Bugün ekranına dön"
-        className="self-start px-3"
+        className="self-start pr-3 font-semibold"
       >
         ‹ Bugün
       </Button>
