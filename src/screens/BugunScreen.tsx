@@ -8,9 +8,7 @@ import { SKILL_BLOCKS } from "../data";
 import type { Book, SkillBlock } from "../data";
 import { useRepoData } from "../data/react";
 import { DayStrip } from "../features/bugun/DayStrip";
-import { HeroCard } from "../features/bugun/HeroCard";
-import { SonraList } from "../features/bugun/SonraList";
-import type { SonraRow } from "../features/bugun/SonraList";
+import { SkillPath } from "../features/bugun/SkillPath";
 import {
   BLOCK_NAMES,
   NBSP,
@@ -94,7 +92,6 @@ export function BugunScreen() {
   const minimumMet = totalDone >= minimum;
 
   const next = pickNextBlock({ doneMinutes: done, planMinutes: plan, dueTotal: queue.dueTotal });
-  const remaining = (block: SkillBlock) => Math.max(0, plan[block] - done[block]);
 
   const activeBook: Book | undefined = books.find((book) => book.id === settings.activeBookId) ?? books[0];
   const okumaLine = activeBook ? bookLine(activeBook) : "Kitap seçilmedi";
@@ -112,27 +109,10 @@ export function BugunScreen() {
 
   const sub: Record<SkillBlock, string> = {
     okuma: okumaLine,
-    kelime: `${queue.dueTotal}${NBSP}kart · ${queue.newToday}${NBSP}yeni kart`,
+    kelime: `${queue.dueTotal}${NBSP}kart bekliyor · tahmini ${reviewMinutes(queue.cards.length, queue.estimatedMinutes)}${NBSP}dk · ${queue.newToday}${NBSP}yeni kart`,
     dinleme: dinlemeLine(videos),
     konusma: konusmaLine(targetWords.length),
   };
-
-  const heroKpi =
-    next === "kelime" ? `${queue.dueTotal}${NBSP}kart` : `${remaining(next)}${NBSP}dk kaldı`;
-  const heroMeta =
-    next === "kelime"
-      ? `tahmini ${reviewMinutes(queue.cards.length, queue.estimatedMinutes)}${NBSP}dk · ${queue.newToday}${NBSP}yeni kart`
-      : sub[next];
-
-  const rows: SonraRow[] = SKILL_BLOCKS.filter((block) => block !== next).map((block) => ({
-    block,
-    sub: sub[block],
-    remainingMinutes: remaining(block),
-    book: block === "okuma" && activeBook ? { shortName: activeBook.shortName, title: activeBook.title } : undefined,
-    dueCards: block === "kelime" ? queue.dueTotal : undefined,
-    videoMinutes: block === "dinleme" ? videos[0]?.durationMinutes : undefined,
-    targetWords: block === "konusma" ? targetWords.length : undefined,
-  }));
 
   // A failed save leaves the timer running (see TimerProvider), so we only need to tell the user.
   const run = (action: Promise<void>) => {
@@ -147,7 +127,8 @@ export function BugunScreen() {
   };
 
   const press = (block: Block) => {
-    if (block === "kelime") openReview();
+    if (timer.running === block) run(timer.stop());
+    else if (block === "kelime") openReview();
     else run(timer.toggle(block));
   };
 
@@ -172,12 +153,15 @@ export function BugunScreen() {
         <p className="text-small leading-[1.35] text-muted">{findingLine({ totalDone, minimum, next })}</p>
       </header>
 
-      <HeroCard
-        block={next}
-        kpi={heroKpi}
-        meta={heroMeta}
-        runningSeconds={timer.running === next ? timer.elapsedSeconds : null}
-        onPress={() => press(next)}
+      <SkillPath
+        next={next}
+        running={timer.running}
+        elapsedSeconds={timer.elapsedSeconds}
+        done={done}
+        plan={plan}
+        dueCards={queue.dueTotal}
+        detail={sub}
+        onPress={press}
       />
 
       <DayStrip
@@ -187,8 +171,6 @@ export function BugunScreen() {
         minimumMet={minimumMet}
         remainingMinutes={Math.max(0, target - totalDone)}
       />
-
-      <SonraList rows={rows} runningBlock={timer.running} runningSeconds={timer.elapsedSeconds} onPress={press} />
 
       {/* Setting the hash is enough: until the İstatistik screen exists the app falls back to Bugün. */}
       <button
