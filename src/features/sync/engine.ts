@@ -13,6 +13,8 @@
 // older than the row it already holds (migration 0003), so an old copy can never win.
 
 import type { Repository, SyncRow, SyncStore } from "../../data";
+import { z } from "zod";
+import { parseRemoteRow } from "../../data/syncSchemas";
 import { SYNC_ORDER, TABLES, UNIQUE_COLUMNS, fromRemoteRow, toRemoteRow } from "./mapping";
 
 export type SyncStatus = "idle" | "syncing" | "offline" | "error" | "disabled";
@@ -57,6 +59,7 @@ export interface RealtimeChannelLike {
   subscribe(): unknown;
 }
 export interface SyncClient {
+  rpc?(name: "eng_merge_card" | "eng_push_card_bundle", args: { p_card: Record<string, unknown> | null; p_logs?: Record<string, unknown>[] }): PromiseLike<{ data: unknown; error: QueryError | null }>;
   from(table: string): {
     upsert(rows: Array<Record<string, unknown>>, options: { onConflict: string }): PromiseLike<{ error: QueryError | null }>;
     select(columns: string): SelectQuery;
@@ -251,6 +254,13 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     if (!twin) return false;
     // Strictly newer than the local twin, otherwise applyRemote would keep the local one.
     const adoptedAt = new Date(Math.max(Date.parse(String(twin.updated_at)), Date.parse(row.updatedAt) + 1)).toISOString();
+    if (store === "cards") {
+      const canonical = parseRemoteRow("cards", fromRemoteRow("cards", twin));
+      if (!canonical) return false;
+      await repo.sync.applyCardMerge(row, canonical as SyncRow);
+      echoesOf(store).set(String(canonical.id), new Date(String(twin.updated_at)).toISOString());
+      return true;
+    }
     const result = await repo.sync.applyRemote(store, [{ ...fromRemoteRow(store, twin), updatedAt: adoptedAt }]);
     if (result.applied === 0) return false;
     echoesOf(store).set(String(fromRemoteRow(store, twin).id), adoptedAt);
@@ -258,7 +268,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   }
 
   /** Pushes one store. Rows the server refuses one by one are added to `problems`; the round goes on. */
-  async function pushStore(store: SyncStore, problems: string[]): Promise<void> {
+  async function pushStore(store: SyncStore, problems: string[], onlyIds?: ReadonlySet<string>): Promise<void> {
     // The time BEFORE listing: a row written while we push has a stamp >= this, so a cursor kept
     // below it can never skip that row.
     const listedAt = now().getTime();
@@ -272,7 +282,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       saveEchoes(store);
       return;
     }
-    const toSend = rows.filter((row) => !isEcho(store, row));
+    const toSend = rows.filter((row) => !isEcho(store, row) && (!onlyIds || onlyIds.has(row.id)));
     const { table } = TABLES[store];
     const toRemote = (row: SyncRow) => toRemoteRow(store, row, userId ?? undefined);
     let failedFloor: string | null = null;
@@ -298,7 +308,31 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
             continue;
           }
           if (!single.error.code || !ROW_ERROR_CODES.has(single.error.code)) throw failureFrom(single.error);
-          // Adopt the server twin and move the losing card's logs locally.
+          if (single.error.code === "23505" && store === "cards" && client!.rpc) {
+            try {
+              const merged = await client!.rpc("eng_merge_card", { p_card: toRemote(row) });
+              if (merged.error) {
+                if (merged.error.code === "PGRST202" || merged.error.code === "42883") {
+                  if (await adoptServerTwin(store, row)) continue;
+                } else if (failureFrom(merged.error).offline) throw failureFrom(merged.error);
+                fail(row, merged.error);
+                continue;
+              }
+              const result = z.object({ canonical_id: z.string().min(1), selected: z.boolean(),
+                card: z.record(z.string(), z.unknown()) }).parse(merged.data);
+              const canonical = parseRemoteRow("cards", fromRemoteRow("cards", result.card));
+              if (!canonical || canonical.id !== result.canonical_id) throw new Error("Invalid card merge response");
+              await repo.sync.applyCardMerge(row, canonical as SyncRow);
+              echo.set(result.canonical_id, new Date(String(result.card.updated_at)).toISOString());
+              continue;
+            } catch (caught) {
+              const failure = failureFrom(caught);
+              if (failure.offline) throw failure;
+              fail(row, { message: failure.message });
+              continue;
+            }
+          }
+          // Other twins (and older clients without rpc) retain server-wins adoption.
           if (single.error.code === "23505" && (await adoptServerTwin(store, row))) continue;
           fail(row, single.error);
         }
@@ -306,6 +340,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     } finally {
       saveEchoes(store);
     }
+    if (onlyIds) return;
     // Move the cursor only past rows that are settled. Never past the listing time (a row pulled
     // from a server whose clock is ahead has a future stamp; following it would hide every new
     // local row written before that time), and never past the first row the server refused.
@@ -317,6 +352,115 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       if (beforeFailed < next) next = beforeFailed;
     }
     if (next > cursor) write(`push.${store}`, next);
+  }
+
+  async function pushCardBundles(problems: string[]): Promise<void> {
+    if (!client!.rpc) {
+      await pushStore("cards", problems);
+      await pushStore("reviewLogs", problems);
+      return;
+    }
+    const listedAt = now().getTime();
+    const sent = {
+      cards: (await repo.sync.listChangedSince("cards", pushCursor("cards"))).filter((r) => !isEcho("cards", r)),
+      reviewLogs: (await repo.sync.listChangedSince("reviewLogs", pushCursor("reviewLogs"))).filter((r) => !isEcho("reviewLogs", r)),
+    };
+    const ids = new Set([...sent.cards.map((r) => r.id), ...sent.reviewLogs.map((r) => String(r.cardId))]);
+    let failed = false;
+    const pushBundle = async (id: string, card: SyncRow | undefined, logs: SyncRow[], allowMerge = true): Promise<void> => {
+      const response = await client!.rpc!("eng_push_card_bundle", {
+        p_card: card ? toRemoteRow("cards", card) : null,
+        p_logs: logs.map((r) => toRemoteRow("reviewLogs", r)),
+      });
+      if (response.error) {
+        if (response.error.code === "PGRST202" || response.error.code === "42883") {
+          throw new Error("Card bundle function missing", { cause: response.error });
+        }
+        throw failureFrom(response.error);
+      }
+      const status = z.object({ status: z.enum(["ok", "merge"]) }).parse(response.data);
+      if (status.status === "merge") {
+        if (!allowMerge) throw new Error("Card redirected again during bundle push");
+        const local = card ?? (await repo.sync.listChangedSince("cards", EPOCH)).find((r) => r.id === id);
+        // A logs-only retry can retain the old id after the local loser was removed.
+        const mergeCard = local ?? (logs[0]?.previousCard as SyncRow | undefined);
+        if (!mergeCard) throw new Error("Missing card for bundle merge");
+        // Preserve an offline undo while the loser still has no server card. Once
+        // redirected, its parent snapshot may differ from the canonical history.
+        if (logs.some((log) => log.deletedAt)) {
+          const prepared = await client!.rpc!("eng_push_card_bundle", {
+            p_card: null, p_logs: logs.map((r) => toRemoteRow("reviewLogs", r)),
+          });
+          if (prepared.error) throw failureFrom(prepared.error);
+          // A pre-existing redirect returns merge without writes; resolve it below.
+          z.object({ status: z.enum(["ok", "merge"]) }).parse(prepared.data);
+        }
+        const merged = await client!.rpc!("eng_merge_card", { p_card: toRemoteRow("cards", mergeCard) });
+        if (merged.error) throw failureFrom(merged.error);
+        const result = z.object({ canonical_id: z.string().min(1), selected: z.boolean(),
+          card: z.record(z.string(), z.unknown()) }).parse(merged.data);
+        const canonical = parseRemoteRow("cards", fromRemoteRow("cards", result.card)) as SyncRow | null;
+        if (!canonical || canonical.id !== result.canonical_id) throw new Error("Invalid card merge response");
+        await repo.sync.applyCardMerge(mergeCard, canonical);
+        if (card) echoesOf("cards").set(card.id, card.updatedAt);
+        echoesOf("cards").set(canonical.id, canonical.updatedAt);
+        const moved = (await repo.sync.listChangedSince("reviewLogs", EPOCH))
+          .filter((r) => r.cardId === canonical.id && !isEcho("reviewLogs", r));
+        if (moved.length) await pushBundle(canonical.id, undefined, moved, false);
+        return;
+      }
+      const raw = z.object({ card: z.record(z.string(), z.unknown()).nullable(),
+        logs: z.array(z.record(z.string(), z.unknown())) }).parse(response.data);
+      const returnedCard = raw.card ? parseRemoteRow("cards", fromRemoteRow("cards", raw.card)) as SyncRow | null : null;
+      const returnedLogs = raw.logs.map((r) => parseRemoteRow("reviewLogs", fromRemoteRow("reviewLogs", r)) as SyncRow | null);
+      if ((raw.card && (!returnedCard || returnedCard.id !== id)) || (card && !returnedCard) ||
+        returnedLogs.some((r) => !r) || new Set(returnedLogs.map((r) => r!.id)).size !== logs.length ||
+        logs.some((l) => !returnedLogs.some((r) => r!.id === l.id))) throw new Error("Invalid card bundle response");
+      const group = { cards: card ? [card] : [], reviewLogs: logs };
+      if (repo.sync.applyCardBundle) {
+        await repo.sync.applyCardBundle(group, returnedCard, returnedLogs as SyncRow[]);
+      } else {
+        if (returnedCard) await repo.sync.applyRemote("cards", [returnedCard]);
+        await repo.sync.applyRemote("reviewLogs", returnedLogs);
+      }
+      for (const store of ["cards", "reviewLogs"] as const) {
+        for (const row of group[store]) echoesOf(store).set(row.id, row.updatedAt);
+        // Only echo the returned version if that version actually reached the repository.
+        const current = await repo.sync.listChangedSince(store, EPOCH);
+        const returned = store === "cards" ? (returnedCard ? [returnedCard] : []) : returnedLogs as SyncRow[];
+        for (const row of returned) if (current.some((r) => r.id === row.id && r.updatedAt === row.updatedAt)) {
+          echoesOf(store).set(row.id, row.updatedAt);
+        }
+      }
+    };
+    try {
+      for (const id of ids) {
+        const card = sent.cards.find((r) => r.id === id);
+        const logs = sent.reviewLogs.filter((r) => r.cardId === id);
+        try {
+          await pushBundle(id, card, logs);
+        } catch (caught) {
+          if (caught instanceof Error && caught.message === "Card bundle function missing") {
+            await pushStore("cards", problems);
+            await pushStore("reviewLogs", problems);
+            return;
+          }
+          const failure = failureFrom(caught);
+          if (failure.offline) throw failure;
+          failed = true;
+          for (const _row of [...(card ? [card] : []), ...logs]) problems.push(failure.message);
+        }
+      }
+      if (!failed) for (const store of ["cards", "reviewLogs"] as const) {
+        let next = sent[store].reduce((max, row) => row.updatedAt > max ? row.updatedAt : max, pushCursor(store));
+        const ceiling = new Date(listedAt - 1).toISOString();
+        if (next > ceiling) next = ceiling;
+        if (next > pushCursor(store)) write(`push.${store}`, next);
+      }
+    } finally {
+      saveEchoes("cards");
+      saveEchoes("reviewLogs");
+    }
   }
 
   /** Postgres gives "...123456+00:00"; a filter value needs "Z" ("+" would be read as a space) and keeps the microseconds. */
@@ -349,11 +493,20 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
         const page = data ?? [];
         if (page.length > 0) {
           const rows = page.map((raw) => fromRemoteRow(store, raw));
-          await repo.sync.applyRemote(store, rows);
+          // Evaluate the local version inside applyRemote's write transaction: an undo may
+          // commit after this response but before that transaction starts.
+          const cursor = pushCursor(store);
+          const protectedIds = new Set<string>();
+          const isPending = store === "cards" || store === "reviewLogs" ? (row: SyncRow): boolean => {
+            const pending = row.updatedAt > cursor && !isEcho(store, row);
+            if (pending) protectedIds.add(row.id);
+            return pending;
+          } : undefined;
+          await repo.sync.applyRemote(store, rows, isPending);
           page.forEach((raw, index) => {
             // Same normalisation as syncSchemas.ts: Postgres sends microseconds and "+00:00".
             const updatedAt = new Date(String(raw.updated_at)).toISOString();
-            echo.set(String(rows[index]?.id), updatedAt);
+            if (!protectedIds.has(String(rows[index]?.id))) echo.set(String(rows[index]?.id), updatedAt);
             if (updatedAt > newest) newest = updatedAt;
           });
           const lastRaw = page[page.length - 1]!;
@@ -388,8 +541,15 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     try {
       const problems: string[] = [];
       for (const store of SYNC_ORDER) {
-        await pushStore(store, problems);
-        await pullStore(store);
+        if (store === "reviewLogs") continue; // Pushed/pulled with cards below.
+        if (store === "cards") {
+          await pushCardBundles(problems);
+          await pullStore("cards");
+          await pullStore("reviewLogs");
+        } else {
+          await pushStore(store, problems);
+          await pullStore(store);
+        }
       }
       if (problems.length > 0) {
         // The rest of the round went through; only these rows are waiting. They are retried each round.
