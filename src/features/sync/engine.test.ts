@@ -21,6 +21,12 @@ function fakeRepo() {
       return () => listeners.delete(listener);
     },
     sync: {
+      listChangedAfterSeq: async (store: SyncStore, seq: number) => {
+        const list = rows.get(store) ?? [];
+        let max = Math.max(0, ...list.map((r) => r.localSeq ?? 0));
+        for (const row of list) if (row.localSeq === undefined) row.localSeq = ++max;
+        return list.filter((row) => row.localSeq! > seq);
+      },
       listChangedSince: async (store: SyncStore, since: string) =>
         (rows.get(store) ?? []).filter((row) => row.updatedAt > since),
       applyRemote: async (store: SyncStore, incoming: unknown[]): Promise<ApplyRemoteResult> => {
@@ -29,7 +35,7 @@ function fakeRepo() {
           const updatedAt = new Date(String(raw.updatedAt)).toISOString();
           const list = rows.get(store) ?? [];
           const index = list.findIndex((row) => row.id === raw.id);
-          const row = { ...raw, updatedAt } as SyncRow;
+          const row = { ...raw, updatedAt, localSeq: index >= 0 ? list[index]!.localSeq ?? 0 : 0 } as SyncRow;
           if (index >= 0) list[index] = row;
           else list.push(row);
         }

@@ -210,23 +210,54 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   const isEcho = (store: SyncStore, row: SyncRow): boolean => echoesOf(store).get(row.id) === row.updatedAt;
   const resetCursors = (): void => {
     for (const store of SYNC_ORDER) {
-      write(`push.${store}`, EPOCH);
+      write(`pushSeq.${store}`, "0");
       write(`pull.${store}`, "");
       write(`echo.${store}`, "{}");
     }
     echoCache.clear();
   };
 
-  const pushCursor = (store: SyncStore): string => read(`push.${store}`) ?? EPOCH;
+  let instanceReady: Promise<void> | null = null;
+  const ensureInstance = (): Promise<void> => {
+    if (!instanceReady) {
+      instanceReady = repo.sync.instanceId().then((instance) => {
+        const saved = read("instance");
+        if (saved !== null && saved !== instance) resetCursors();
+        write("instance", instance);
+      }).catch((error) => {
+        instanceReady = null;
+        throw error;
+      });
+    }
+    return instanceReady;
+  };
+
+  const pushCursor = async (store: SyncStore): Promise<number> => {
+    await ensureInstance();
+    let saved = read(`pushSeq.${store}`);
+    if (saved === null) {
+      const oldCursor = read(`push.${store}`);
+      let migrated = 0;
+      if (oldCursor !== null) {
+        const upgradeMax = await repo.sync.upgradeMaxLocalSeq(store);
+        if (upgradeMax !== null) migrated = Math.min(await repo.sync.maxLocalSeqThrough(store, oldCursor), upgradeMax);
+      }
+      saved = String(migrated);
+      write(`pushSeq.${store}`, saved);
+    }
+    const seq = Number(saved);
+    return Number.isSafeInteger(seq) && seq >= 0 ? seq : 0;
+  };
   const pullCursor = (store: SyncStore): string | null => read(`pull.${store}`);
 
   // ---------- Pending count ----------
   let pendingToken = 0;
   async function refreshPending(): Promise<number> {
     const token = ++pendingToken;
+    await ensureInstance();
     let count = 0;
     for (const store of SYNC_ORDER) {
-      const rows = await repo.sync.listChangedSince(store, pushCursor(store));
+      const rows = await repo.sync.listChangedAfterSeq(store, await pushCursor(store));
       count += rows.filter((row) => !isEcho(store, row)).length;
     }
     // A newer refresh started while this one read: its answer is the fresh one.
@@ -269,11 +300,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
   /** Pushes one store. Rows the server refuses one by one are added to `problems`; the round goes on. */
   async function pushStore(store: SyncStore, problems: string[], onlyIds?: ReadonlySet<string>): Promise<void> {
-    // The time BEFORE listing: a row written while we push has a stamp >= this, so a cursor kept
-    // below it can never skip that row.
-    const listedAt = now().getTime();
-    const cursor = pushCursor(store);
-    const rows = await repo.sync.listChangedSince(store, cursor);
+    // A concurrent write receives a sequence beyond this snapshot in its store transaction.
+    const cursor = await pushCursor(store);
+    const rows = await repo.sync.listChangedAfterSeq(store, cursor);
     const echo = echoesOf(store);
     // Forget rows that are no longer newer than the cursor.
     const listed = new Set(rows.map((row) => row.id));
@@ -285,9 +314,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     const toSend = rows.filter((row) => !isEcho(store, row) && (!onlyIds || onlyIds.has(row.id)));
     const { table } = TABLES[store];
     const toRemote = (row: SyncRow) => toRemoteRow(store, row, userId ?? undefined);
-    let failedFloor: string | null = null;
+    let failedFloor: number | null = null;
     const fail = (row: SyncRow, error: QueryError): void => {
-      if (failedFloor === null || row.updatedAt < failedFloor) failedFloor = row.updatedAt;
+      if (failedFloor === null || (row.localSeq ?? 0) < failedFloor) failedFloor = row.localSeq ?? 0;
       problems.push(error.message);
     };
     try {
@@ -341,17 +370,10 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       saveEchoes(store);
     }
     if (onlyIds) return;
-    // Move the cursor only past rows that are settled. Never past the listing time (a row pulled
-    // from a server whose clock is ahead has a future stamp; following it would hide every new
-    // local row written before that time), and never past the first row the server refused.
-    let next = rows.reduce((max, row) => (row.updatedAt > max ? row.updatedAt : max), cursor);
-    const ceiling = new Date(listedAt - 1).toISOString();
-    if (next > ceiling) next = ceiling;
-    if (failedFloor !== null) {
-      const beforeFailed = new Date(Date.parse(failedFloor) - 1).toISOString();
-      if (beforeFailed < next) next = beforeFailed;
-    }
-    if (next > cursor) write(`push.${store}`, next);
+    // Advance only through this snapshot, stopping before the first refused sequence.
+    let next = rows.reduce((max, row) => Math.max(row.localSeq ?? 0, max), cursor);
+    if (failedFloor !== null) next = Math.min(next, failedFloor - 1);
+    if (next > cursor) write(`pushSeq.${store}`, String(next));
   }
 
   async function pushCardBundles(problems: string[]): Promise<void> {
@@ -360,10 +382,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       await pushStore("reviewLogs", problems);
       return;
     }
-    const listedAt = now().getTime();
     const sent = {
-      cards: (await repo.sync.listChangedSince("cards", pushCursor("cards"))).filter((r) => !isEcho("cards", r)),
-      reviewLogs: (await repo.sync.listChangedSince("reviewLogs", pushCursor("reviewLogs"))).filter((r) => !isEcho("reviewLogs", r)),
+      cards: (await repo.sync.listChangedAfterSeq("cards", await pushCursor("cards"))).filter((r) => !isEcho("cards", r)),
+      reviewLogs: (await repo.sync.listChangedAfterSeq("reviewLogs", await pushCursor("reviewLogs"))).filter((r) => !isEcho("reviewLogs", r)),
     };
     const ids = new Set([...sent.cards.map((r) => r.id), ...sent.reviewLogs.map((r) => String(r.cardId))]);
     let failed = false;
@@ -452,10 +473,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
         }
       }
       if (!failed) for (const store of ["cards", "reviewLogs"] as const) {
-        let next = sent[store].reduce((max, row) => row.updatedAt > max ? row.updatedAt : max, pushCursor(store));
-        const ceiling = new Date(listedAt - 1).toISOString();
-        if (next > ceiling) next = ceiling;
-        if (next > pushCursor(store)) write(`push.${store}`, next);
+        const cursor = await pushCursor(store);
+        const next = sent[store].reduce((max, row) => Math.max(row.localSeq ?? 0, max), cursor);
+        if (next > cursor) write(`pushSeq.${store}`, String(next));
       }
     } finally {
       saveEchoes("cards");
@@ -495,10 +515,10 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
           const rows = page.map((raw) => fromRemoteRow(store, raw));
           // Evaluate the local version inside applyRemote's write transaction: an undo may
           // commit after this response but before that transaction starts.
-          const cursor = pushCursor(store);
+          const cursor = await pushCursor(store);
           const protectedIds = new Set<string>();
           const isPending = store === "cards" || store === "reviewLogs" ? (row: SyncRow): boolean => {
-            const pending = row.updatedAt > cursor && !isEcho(store, row);
+            const pending = (row.localSeq ?? 0) > cursor && !isEcho(store, row);
             if (pending) protectedIds.add(row.id);
             return pending;
           } : undefined;
