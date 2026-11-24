@@ -3,7 +3,7 @@
 
 import type { VideoLevel, VideoUnderstanding } from "../../../data";
 import type { LocalDay } from "../../../data/localDay";
-import { formatHoursMinutes, LISTENING_GOAL_HOURS, projectGoalDate } from "./listening";
+import { forecastState, formatHoursMinutes, LISTENING_GOAL_HOURS } from "./listening";
 export { LISTENING_GOAL_HOURS } from "./listening";
 
 // A non-breaking space keeps "12 / 25 dk" and "17 Kasım 2026" on one line.
@@ -80,25 +80,25 @@ export interface ForecastText {
 }
 
 /**
- * The "Tahmini tarih" texts. Three honest cases: goal reached, no pace to project from, or a date.
- * The date itself comes from `projectGoalDate`, so the screen and the tested logic cannot differ.
+ * The "Tahmini tarih" texts, using the shared listening forecast eligibility rule.
  */
 export function forecastText(
   totalMinutes: number,
   goalHours: number,
-  paceMinutes: number,
+  dayMinutes: readonly number[],
   now: Date = new Date(),
 ): ForecastText {
-  if (totalMinutes >= goalHours * 60) {
+  const state = forecastState(dayMinutes, totalMinutes, goalHours, now);
+  if (state.kind === "reached") {
     return { date: "Hedefe ulaştın", note: "Yeni bir hedef koyabilirsin." };
   }
-  const day = projectGoalDate(totalMinutes, goalHours, paceMinutes, now);
-  if (day === null) return { date: "Hesaplanamadı", note: "Son 14 günde kayıt yok." };
-  const daysLeft = Math.ceil((goalHours * 60 - totalMinutes) / paceMinutes);
+  if (state.kind === "none") return { date: "Hesaplanamadı", note: "Son 14 günde kayıt yok." };
+  if (state.kind === "early") return { date: "Henüz erken", note: "Birkaç gün dinleyince tarih çıkar." };
+  if (state.kind === "far") return { date: "3 yıldan uzun", note: "Günlük ortalama arttıkça tarih yaklaşır." };
   return {
-    date: formatGoalDate(day),
+    date: formatGoalDate(state.day),
     // Only the days left: the daily average is already the cell next to this one (the draft shows no repeat).
-    note: `${daysLeft}${NBSP}gün sonra`,
+    note: `${state.daysLeft}${NBSP}gün sonra`,
   };
 }
 

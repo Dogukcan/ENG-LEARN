@@ -16,6 +16,35 @@ export const LISTENING_GOAL_HOURS = 50;
 /** How many local days (today included) the pace is measured over. */
 export const PACE_WINDOW_DAYS = 14;
 
+export const FORECAST_MIN_ACTIVE_DAYS = 3;
+export const FORECAST_MAX_DAYS = 1095;
+
+export type ForecastState =
+  | { kind: "reached" }
+  | { kind: "none" }
+  | { kind: "early" }
+  | { kind: "far" }
+  | { kind: "date"; day: LocalDay; daysLeft: number };
+
+/** Forecast eligibility from the last 14 days, oldest first; rest days count in the pace. */
+export function forecastState(
+  dayMinutes: readonly number[],
+  totalMinutes: number,
+  goalHours: number,
+  now: Date = new Date(),
+): ForecastState {
+  if (totalMinutes >= goalHours * 60) return { kind: "reached" };
+  const window = dayMinutes.slice(-PACE_WINDOW_DAYS);
+  const activeDays = window.filter((minutes) => minutes > 0).length;
+  if (activeDays === 0) return { kind: "none" };
+  if (activeDays < FORECAST_MIN_ACTIVE_DAYS) return { kind: "early" };
+  const pace = window.reduce((sum, minutes) => sum + minutes, 0) / PACE_WINDOW_DAYS;
+  const daysLeft = Math.ceil((goalHours * 60 - totalMinutes) / pace);
+  if (daysLeft > FORECAST_MAX_DAYS) return { kind: "far" };
+  const day = projectGoalDate(totalMinutes, goalHours, pace, now);
+  return day === null ? { kind: "none" } : { kind: "date", day, daysLeft };
+}
+
 function dinlemeSeconds(logs: readonly ActivityLog[]): number {
   let seconds = 0;
   for (const log of logs) {

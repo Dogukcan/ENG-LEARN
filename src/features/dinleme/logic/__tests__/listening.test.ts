@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityLog } from "../../../../data/types";
-import { formatHoursMinutes, paceMinutesPerDay, projectGoalDate, totalListeningMinutes } from "../listening";
+import { forecastState, FORECAST_MAX_DAYS, FORECAST_MIN_ACTIVE_DAYS, formatHoursMinutes, paceMinutesPerDay, projectGoalDate, totalListeningMinutes } from "../listening";
 
 // Dates use local-time constructors so the tests pass in any time zone.
 let counter = 0;
@@ -62,6 +62,50 @@ describe("paceMinutesPerDay", () => {
 
   it("ignores logs later than today", () => {
     expect(paceMinutesPerDay([log("dinleme", new Date(2026, 10, 18, 0, 5), 60)], now)).toBe(0);
+  });
+});
+
+describe("forecastState", () => {
+  const now = new Date(2026, 10, 17, 12);
+  const window = (...minutes: number[]) => [...minutes, ...Array(14 - minutes.length).fill(0)];
+
+  it("requires three active days, including the reported one-minute case", () => {
+    expect(FORECAST_MIN_ACTIVE_DAYS).toBe(3);
+    expect(forecastState(window(1), 1, 50, now)).toEqual({ kind: "early" });
+    expect(forecastState(window(175, 175), 2900, 50, now)).toEqual({ kind: "early" });
+    expect(forecastState(window(100, 100, 150), 2900, 50, now)).toEqual({
+      kind: "date", day: "2026-11-21", daysLeft: 4,
+    });
+  });
+
+  it("withholds distant dates with three tiny active days", () => {
+    expect(forecastState(window(1, 1, 1), 3, 50, now)).toEqual({ kind: "far" });
+  });
+
+  it("allows exactly 1095 days and rejects 1096 days", () => {
+    expect(FORECAST_MAX_DAYS).toBe(1095);
+    const minutes = window(4, 5, 5); // 1 minute/day, including rest days.
+    expect(forecastState(minutes, 3000 - 1095, 50, now)).toEqual({
+      kind: "date", day: projectGoalDate(3000 - 1095, 50, 1, now), daysLeft: 1095,
+    });
+    expect(forecastState(minutes, 3000 - 1096, 50, now)).toEqual({ kind: "far" });
+  });
+
+  it("keeps the normal date from projectGoalDate", () => {
+    expect(forecastState(Array(14).fill(30), 500, 10, now)).toEqual({
+      kind: "date", day: projectGoalDate(500, 10, 30, now), daysLeft: 4,
+    });
+  });
+
+  it("handles reached goals before checking recent listening", () => {
+    expect(forecastState(window(), 3000, 50, now)).toEqual({ kind: "reached" });
+    expect(forecastState(window(1), 3001, 50, now)).toEqual({ kind: "reached" });
+  });
+
+  it("handles no listening and excludes days before the window", () => {
+    expect(forecastState([], 0, 50, now)).toEqual({ kind: "none" });
+    expect(forecastState(window(), 100, 50, now)).toEqual({ kind: "none" });
+    expect(forecastState([100, 100, 100, ...window()], 300, 50, now)).toEqual({ kind: "none" });
   });
 });
 

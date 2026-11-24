@@ -29,7 +29,7 @@ interface ListeningSummaryProps {
 export function ListeningSummary({ totalMinutes, dayMinutes, planMinutes, now }: ListeningSummaryProps) {
   const percent = goalPercent(totalMinutes, LISTENING_GOAL_HOURS);
   const pace = paceFromDayMinutes(dayMinutes);
-  const forecast = forecastText(totalMinutes, LISTENING_GOAL_HOURS, pace, now);
+  const forecast = forecastText(totalMinutes, LISTENING_GOAL_HOURS, dayMinutes, now);
   const { bars, planPercent } = buildBars(dayMinutes, planMinutes);
 
   return (

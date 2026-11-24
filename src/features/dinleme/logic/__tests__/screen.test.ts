@@ -71,17 +71,37 @@ describe("forecastText", () => {
 
   it("projects a date from the pace", () => {
     // 100 minutes left at 25 per day = 4 days -> 21 November.
-    const result = forecastText(2900, 50, 25, now);
+    const result = forecastText(2900, 50, Array(14).fill(25), now);
     expect(result.date).toBe(`21${NBSP}Kasım${NBSP}2026`);
     expect(result.note).toBe(`4${NBSP}gün sonra`);
   });
 
   it("says the goal is reached", () => {
-    expect(forecastText(3000, 50, 25, now).date).toBe("Hedefe ulaştın");
+    expect(forecastText(3000, 50, [], now)).toEqual({ date: "Hedefe ulaştın", note: "Yeni bir hedef koyabilirsin." });
   });
 
   it("is honest when there is no pace", () => {
-    expect(forecastText(100, 50, 0, now)).toEqual({ date: "Hesaplanamadı", note: "Son 14 günde kayıt yok." });
+    expect(forecastText(100, 50, Array(14).fill(0), now)).toEqual({ date: "Hesaplanamadı", note: "Son 14 günde kayıt yok." });
+  });
+
+  it("shows early for the reported one-minute case and exactly two active days", () => {
+    for (const minutes of [[1, ...Array(13).fill(0)], [175, 175, ...Array(12).fill(0)]]) {
+      expect(forecastText(1, 50, minutes, now)).toEqual({
+        date: "Henüz erken", note: "Birkaç gün dinleyince tarih çıkar.",
+      });
+    }
+  });
+
+  it("shows a date at exactly three active days", () => {
+    expect(forecastText(2900, 50, [100, 100, 150, ...Array(11).fill(0)], now)).toEqual({
+      date: `21${NBSP}Kasım${NBSP}2026`, note: `4${NBSP}gün sonra`,
+    });
+  });
+
+  it("shows far for three active days with tiny minutes", () => {
+    expect(forecastText(3, 50, [1, 1, 1, ...Array(11).fill(0)], now)).toEqual({
+      date: "3 yıldan uzun", note: "Günlük ortalama arttıkça tarih yaklaşır.",
+    });
   });
 });
 

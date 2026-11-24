@@ -92,10 +92,31 @@ describe("listeningProjectionText", () => {
       "Son 14 günde dinleme yok; tarih hesaplanamıyor.",
     );
   });
-  it("projects a date from the 14-day pace", () => {
-    // 14 min per 14 days = 1 min/day; 2900 min remain => 2900 days. Check only the shape.
-    const text = listeningProjectionText(100, 50, [day("2026-11-18", { dinleme: 14 })], "2026-11-18");
-    expect(text).toMatch(/^Bu hızla .* tarihinde hedefe ulaşırsın\.$/);
+  it("shows early for the reported one-minute case and exactly two active days", () => {
+    for (const minutes of [[1], [175, 175]]) {
+      const entries = minutes.map((dinleme, i) => day(`2026-11-${17 + i}`, { dinleme }));
+      expect(listeningProjectionText(1, 50, entries, "2026-11-18")).toBe(
+        "Birkaç gün dinleyince tahmini tarih çıkar.",
+      );
+    }
+  });
+  it("shows a date at exactly three active days and counts rest days", () => {
+    const entries = [100, 100, 150].map((dinleme, i) => day(`2026-11-${16 + i}`, { dinleme }));
+    expect(listeningProjectionText(2900, 50, entries, "2026-11-18")).toBe(
+      `Bu hızla ${formatDay("2026-11-22", true)} tarihinde hedefe ulaşırsın.`,
+    );
+  });
+  it("shows far for three active days with tiny minutes", () => {
+    const entries = [16, 17, 18].map((date) => day(`2026-11-${date}`, { dinleme: 1 }));
+    expect(listeningProjectionText(3, 50, entries, "2026-11-18")).toBe(
+      "Bu hızla hedef 3 yıldan uzun sürer; günlük ortalama arttıkça tarih yaklaşır.",
+    );
+  });
+  it("ignores listening before the 14-day window", () => {
+    const entries = [day("2026-11-04", { dinleme: 500 }), ...Array.from({ length: 14 }, (_, i) => day(`2026-11-${5 + i}`))];
+    expect(listeningProjectionText(500, 50, entries, "2026-11-18")).toBe(
+      "Son 14 günde dinleme yok; tarih hesaplanamıyor.",
+    );
   });
   it("projects an exact date", () => {
     // 100 min/day pace needs 28 more days for the remaining 2800 minutes... pace 100 => 28 days.

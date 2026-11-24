@@ -5,7 +5,7 @@ import type { CategoryWeeks, DayMinutes, NgslBand, ReviewSuccess, SkillBlock } f
 import { SKILL_BLOCKS } from "../../data";
 import { addLocalDays, type LocalDay } from "../../data/localDay";
 import { ERROR_CATEGORY_LABELS, isErrorCategory } from "../konusma/logic/errorCategories";
-import { formatHoursMinutes, projectGoalDate } from "../dinleme/logic/listening";
+import { forecastState, formatHoursMinutes } from "../dinleme/logic/listening";
 export { LISTENING_GOAL_HOURS } from "../dinleme/logic/listening";
 
 export const NBSP = "\u00A0";
@@ -179,13 +179,13 @@ export function listeningProjectionText(
   days: readonly DayMinutes[],
   today: LocalDay,
 ): string {
-  if (totalMinutes >= goalHours * 60) return "Hedefe ulaştın.";
-  const window = days.slice(-PACE_DAYS);
-  const pace = window.reduce((sum, entry) => sum + entry.minutes.dinleme, 0) / PACE_DAYS;
   const [year, month, date] = today.split("-").map(Number);
-  const reach = projectGoalDate(totalMinutes, goalHours, pace, new Date(year, month - 1, date));
-  if (reach === null) return `Son ${PACE_DAYS} günde dinleme yok; tarih hesaplanamıyor.`;
-  return `Bu hızla ${formatDay(reach, true)} tarihinde hedefe ulaşırsın.`;
+  const state = forecastState(days.map((entry) => entry.minutes.dinleme), totalMinutes, goalHours, new Date(year, month - 1, date));
+  if (state.kind === "reached") return "Hedefe ulaştın.";
+  if (state.kind === "none") return `Son ${PACE_DAYS} günde dinleme yok; tarih hesaplanamıyor.`;
+  if (state.kind === "early") return "Birkaç gün dinleyince tahmini tarih çıkar.";
+  if (state.kind === "far") return "Bu hızla hedef 3 yıldan uzun sürer; günlük ortalama arttıkça tarih yaklaşır.";
+  return `Bu hızla ${formatDay(state.day, true)} tarihinde hedefe ulaşırsın.`;
 }
 
 export function goalLabel(goalHours: number): string {
