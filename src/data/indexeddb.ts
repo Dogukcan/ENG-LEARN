@@ -98,8 +98,9 @@ import type {
  * Version 4 (sync) gives every record `updatedAt`, adds a `by-updatedAt` index to every store,
  * and adds the stores `videos`, `speakingSessions` and `speakingErrors`.
  * Version 5 gives the two seed books fixed ids and merges the old random-id copies into them.
+ * Version 6 adds per-store local change sequences, independent of wall-clock stamps.
  */
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 /**
  * Version 3 upgrade step: recompute `normalized` for every stored record with the current
@@ -177,64 +178,93 @@ async function backfillUpdatedAt(
   }
 }
 
+/** Sequence metadata is local to this database; public domain records omit it. */
+function withoutSeq<T extends object>(value: T): T {
+  const { localSeq: _seq, ...row } = value as T & { localSeq?: number };
+  return row as T;
+}
+
+/** Read the maximum only inside the same transaction that will write the change. */
+async function nextLocalSeq(store: unknown): Promise<number> {
+  const os = store as {
+    indexNames: DOMStringList;
+    index(name: string): { openKeyCursor(query: null, direction: "prev"): Promise<{ key: IDBValidKey } | null> };
+  };
+  // Pre-v6 upgrade repairs are assigned sequences by the subsequent ordered backfill.
+  const last = os.indexNames.contains("by-localSeq")
+    ? await os.index("by-localSeq").openKeyCursor(null, "prev") : null;
+  return Number(last?.key ?? 0) + 1;
+}
+
+/** Called only with a store in the caller's readwrite transaction. */
+async function putLocal(store: unknown, value: object, key?: string): Promise<unknown> {
+  const seq = await nextLocalSeq(store);
+  return (store as { put(value: object, key?: string): Promise<unknown> })
+    .put({ ...value, localSeq: seq }, key);
+}
+
 /** Settings are a single record stored under this fixed key. */
 const SETTINGS_KEY = "app";
 
 // Stored records carry hidden helper fields (`normalized`, `youtubeKey`). They let an index find
 // duplicates quickly. The public types stay clean: we strip them before returning. The field is
 // missing on soft-deleted records on purpose (see the header of this file).
-type StoredInboxItem = InboxItem & { normalized?: string };
-type StoredWord = Word & { normalized?: string };
-type StoredVideo = Video & { youtubeKey?: string };
+type Sequenced<T> = T & { localSeq?: number };
+
+type StoredInboxItem = Sequenced<InboxItem> & { normalized?: string };
+type StoredWord = Sequenced<Word> & { normalized?: string };
+type StoredVideo = Sequenced<Video> & { youtubeKey?: string };
 // Settings are stored as a patch (so settings added later fall back to their defaults) plus the
 // sync fields. The fixed id "app" is what the sync engine sees; this is a single-user app.
-type StoredSettings = SettingsPatch & { id: string; updatedAt: string; deletedAt?: string };
+type StoredSettings = Sequenced<SettingsPatch> & { id: string; updatedAt: string; deletedAt?: string };
 
 interface EngLearnDB extends DBSchema {
-  books: { key: string; value: Book; indexes: { "by-updatedAt": string } };
+  // Local database identity and upgrade boundaries, never exposed as synced rows.
+  syncMeta: { key: SyncStore | "instance"; value: { upgradeMaxSeq?: number; instanceId?: string } };
+  books: { key: string; value: Sequenced<Book>; indexes: { "by-localSeq": number; "by-updatedAt": string } };
   inbox: {
     key: string;
     value: StoredInboxItem;
-    indexes: { "by-normalized": string; "by-createdAt": string; "by-updatedAt": string };
+    indexes: { "by-normalized": string; "by-createdAt": string; "by-localSeq": number; "by-updatedAt": string };
   };
   words: {
     key: string;
     value: StoredWord;
-    indexes: { "by-normalized": string; "by-status": WordStatus; "by-updatedAt": string };
+    indexes: { "by-normalized": string; "by-status": WordStatus; "by-localSeq": number; "by-updatedAt": string };
   };
   activity: {
     key: string;
-    value: ActivityLog;
-    indexes: { "by-startedAt": string; "by-updatedAt": string };
+    value: Sequenced<ActivityLog>;
+    indexes: { "by-startedAt": string; "by-localSeq": number; "by-updatedAt": string };
   };
   cards: {
     key: string;
-    value: Card;
+    value: Sequenced<Card>;
     // by-wordId is unique: one card per word, enforced by the database itself.
-    indexes: { "by-wordId": string; "by-due": string; "by-updatedAt": string };
+    indexes: { "by-wordId": string; "by-due": string; "by-localSeq": number; "by-updatedAt": string };
   };
   reviewLogs: {
     key: string;
-    value: ReviewLog;
-    indexes: { "by-reviewedAt": string; "by-cardId": string; "by-updatedAt": string };
+    value: Sequenced<ReviewLog>;
+    indexes: { "by-reviewedAt": string; "by-cardId": string; "by-localSeq": number; "by-updatedAt": string };
   };
   // Out-of-line key (no keyPath): the record is stored under SETTINGS_KEY.
-  settings: { key: string; value: StoredSettings; indexes: { "by-updatedAt": string } };
+  settings: { key: string; value: StoredSettings; indexes: { "by-localSeq": number; "by-updatedAt": string } };
   videos: {
     key: string;
     value: StoredVideo;
     // by-youtubeKey is unique: the same YouTube video cannot be in the list twice.
-    indexes: { "by-youtubeKey": string; "by-status": VideoStatus; "by-updatedAt": string };
+    indexes: { "by-youtubeKey": string; "by-status": VideoStatus; "by-localSeq": number; "by-updatedAt": string };
   };
   speakingSessions: {
     key: string;
-    value: SpeakingSession;
-    indexes: { "by-startedAt": string; "by-updatedAt": string };
+    value: Sequenced<SpeakingSession>;
+    indexes: { "by-startedAt": string; "by-localSeq": number; "by-updatedAt": string };
   };
   speakingErrors: {
     key: string;
-    value: SpeakingError;
-    indexes: { "by-sessionId": string; "by-updatedAt": string };
+    value: Sequenced<SpeakingError>;
+    indexes: { "by-sessionId": string; "by-localSeq": number; "by-updatedAt": string };
   };
 }
 
@@ -293,7 +323,7 @@ async function mergeSeedBookCopies(
     // brand-new seed rows in seedBooks keep the epoch stamp. This can let a stale v4 copy
     // overwrite newer progress from another device, accepted because no v4 build was ever published.
     const newest = named.reduce((max, book) => ((book.updatedAt as string) > max ? (book.updatedAt as string) : max), "");
-    await stores.books.put({
+    await putLocal(stores.books, {
       id: seedId,
       title: donor.title,
       shortName,
@@ -302,7 +332,7 @@ async function mergeSeedBookCopies(
       updatedAt: stampFrom(now, newest),
     });
     for (const copy of copies) {
-      await stores.books.put(tombstone(copy as { updatedAt: string; deletedAt?: string }, now));
+      await putLocal(stores.books, tombstone(copy as { updatedAt: string; deletedAt?: string }, now));
     }
   }
   if (idMap.size === 0) return;
@@ -310,7 +340,7 @@ async function mergeSeedBookCopies(
   const settings = await stores.settings.get(SETTINGS_KEY);
   const activeId = settings?.activeBookId;
   if (settings && typeof activeId === "string" && idMap.has(activeId)) {
-    await stores.settings.put(
+    await putLocal(stores.settings,
       { ...settings, activeBookId: idMap.get(activeId), updatedAt: stampFrom(now, settings.updatedAt as string | undefined) },
       SETTINGS_KEY,
     );
@@ -319,7 +349,7 @@ async function mergeSeedBookCopies(
     for (const record of await store.getAll()) {
       const source = record.source as { kind?: string; bookId?: string } | undefined;
       if (source?.kind === "kitap" && typeof source.bookId === "string" && idMap.has(source.bookId)) {
-        await store.put({
+        await putLocal(store, {
           ...record,
           source: { ...source, bookId: idMap.get(source.bookId) },
           updatedAt: stampFrom(now, record.updatedAt as string | undefined),
@@ -332,7 +362,7 @@ async function mergeSeedBookCopies(
 /** Keep every review when a twin card loses, and stamp the changed links for the next push. */
 async function moveCardReviewLogs(logs: LooseStore, loserId: string, winnerId: string, now: Date): Promise<void> {
   for (const log of await logs.index("by-cardId").getAll(loserId)) {
-    await logs.put({ ...log, cardId: winnerId, updatedAt: stampFrom(now, log.updatedAt as string) });
+    await putLocal(logs, { ...log, cardId: winnerId, updatedAt: stampFrom(now, log.updatedAt as string) });
   }
 }
 
@@ -359,18 +389,20 @@ async function moveCardAfterWordTwin(
   const survivorLive = survivorCard !== undefined && isLive(survivorCard as { deletedAt?: string });
 
   if (survivorLive && (survivorCard.reps as number) >= (deadCard.reps as number)) {
-    await cards.put(tombstone(deadCard as { updatedAt: string }, now));
+    await putLocal(cards, tombstone(deadCard as { updatedAt: string }, now));
     await moveCardReviewLogs(reviewLogs, deadCard.id as string, survivorCard.id as string, now);
     return;
   }
   // by-wordId is unique even for soft-deleted cards, so the survivor's old record (a tombstone, or
   // a live card with fewer reps) is removed for real before the winner takes the word id.
+  const rekeySeq = await nextLocalSeq(cards);
   if (survivorCard) {
     await moveCardReviewLogs(reviewLogs, survivorCard.id as string, deadCard.id as string, now);
     await cards.delete(survivorCard.id as string);
   }
   await cards.put({
     ...deadCard,
+    localSeq: rekeySeq,
     wordId: survivorWordId,
     updatedAt: stampFrom(now, deadCard.updatedAt as string),
   });
@@ -464,7 +496,7 @@ function toWord(stored: StoredWord): Word {
 }
 
 function toVideo(stored: StoredVideo): Video {
-  const { youtubeKey: _hidden, ...video } = stored;
+  const { youtubeKey: _hidden, localSeq: _seq, ...video } = stored;
   return video;
 }
 
@@ -477,6 +509,7 @@ function toSyncRow(store: SyncStore, stored: Loose): SyncRow {
     return {
       ...full,
       id: SETTINGS_KEY,
+      localSeq: (stored.localSeq as number | undefined) ?? 0,
       updatedAt: stored.updatedAt as string,
       ...(typeof stored.deletedAt === "string" ? { deletedAt: stored.deletedAt } : {}),
     };
@@ -544,7 +577,7 @@ export function createIndexedDbRepository(
             // database is never visible without its books.
             const books = transaction.objectStore("books");
             for (const book of seedBooks()) {
-              void books.put(book);
+              void books.put({ ...book, localSeq: 0 });
             }
           }
           if (oldVersion < 2) {
@@ -636,6 +669,23 @@ export function createIndexedDbRepository(
               new Date(),
             );
           }
+          if (oldVersion < 6) {
+            const meta = database.createObjectStore("syncMeta");
+            await meta.put({ instanceId: crypto.randomUUID() }, "instance");
+            for (const name of [...database.objectStoreNames]) {
+              if (name === "syncMeta") continue;
+              const store = transaction.objectStore(name);
+              store.createIndex("by-localSeq", "localSeq");
+              // One ordered pass, including tombstones and out-of-line settings keys.
+              let cursor = await store.index("by-updatedAt").openCursor();
+              let seq = 0;
+              while (cursor) {
+                await cursor.update({ ...cursor.value, localSeq: oldVersion === 0 ? 0 : ++seq } as never);
+                cursor = await cursor.continue();
+              }
+              if (oldVersion > 0) await meta.put({ upgradeMaxSeq: seq }, name);
+            }
+          }
         },
         // If another tab or the home-screen app opens a newer DB version in a future phase,
         // close our older connection and drop the cached promise so the upgrade is not blocked.
@@ -710,7 +760,7 @@ export function createIndexedDbRepository(
     delete stored.previousStatus;
     delete stored.deletedAt;
     if (sameInWords) stored.previousStatus = sameInWords.status as "known" | "ignored";
-    await inbox.put({ ...stored, normalized });
+    await putLocal(inbox, { ...stored, normalized });
     return { ok: true, item: stored };
   }
 
@@ -734,7 +784,7 @@ export function createIndexedDbRepository(
     // [start, end): include local midnight, exclude the next local midnight.
     const keyRange = IDBKeyRange.bound(start, end, false, true);
     const logs = await (await db()).getAllFromIndex("activity", "by-startedAt", keyRange);
-    return logs.filter(isLive);
+    return logs.filter(isLive).map(withoutSeq);
   }
 
   async function readSettings(): Promise<Settings> {
@@ -797,12 +847,12 @@ export function createIndexedDbRepository(
     books: {
       async list() {
         const books = await (await db()).getAll("books");
-        return books.filter(isLive).sort((a, b) => a.shortName.localeCompare(b.shortName));
+        return books.filter(isLive).map(withoutSeq).sort((a, b) => a.shortName.localeCompare(b.shortName));
       },
 
       async get(id: string) {
         const book = await (await db()).get("books", id);
-        return isLive(book) ? book : undefined;
+        return isLive(book) ? withoutSeq(book) : undefined;
       },
 
       async upsert(input: BookInput) {
@@ -819,7 +869,7 @@ export function createIndexedDbRepository(
             page: input.page,
             updatedAt: stampFrom(new Date(), existing?.updatedAt),
           };
-          await tx.objectStore("books").put(book);
+          await putLocal(tx.objectStore("books"), book);
           return book;
         });
       },
@@ -837,8 +887,8 @@ export function createIndexedDbRepository(
             page: position.page,
             updatedAt: stampFrom(new Date(), existing.updatedAt),
           };
-          await tx.objectStore("books").put(updated);
-          return updated;
+          await putLocal(tx.objectStore("books"), updated);
+          return withoutSeq(updated);
         });
       },
     },
@@ -873,7 +923,7 @@ export function createIndexedDbRepository(
           const existing = await tx.objectStore("inbox").get(id);
           if (!isLive(existing)) return undefined;
           // Soft delete: the row stays (marked) so the sync engine can tell the server.
-          await tx.objectStore("inbox").put(tombstone(existing, new Date(), "normalized"));
+          await putLocal(tx.objectStore("inbox"), tombstone(existing, new Date(), "normalized"));
           return toInboxItem(existing);
         });
       },
@@ -933,7 +983,7 @@ export function createIndexedDbRepository(
               if (oldCard.deletedAt !== undefined) {
                 const revived: Card = { ...oldCard, updatedAt: stampFrom(now, oldCard.updatedAt) };
                 delete revived.deletedAt;
-                await cardsStore.put(revived);
+                await putLocal(cardsStore, revived);
               }
             } else {
               // The daily limit protects the user from a review pile they cannot keep up with.
@@ -941,12 +991,12 @@ export function createIndexedDbRepository(
               const settings = applySettingsPatch(DEFAULT_SETTINGS, isLive(settingsRecord) ? settingsRecord : {});
               const createdToday = countCreatedOnLocalDay(await cardsStore.getAll(), now);
               if (createdToday >= settings.newCardLimit) return { ok: false, reason: "new-card-limit" };
-              await cardsStore.put(createNewCardWith(scheduler, word.id, now));
+              await putLocal(cardsStore, createNewCardWith(scheduler, word.id, now));
             }
           }
 
-          await wordsStore.put(word);
-          await inbox.put(tombstone(item, now, "normalized"));
+          await putLocal(wordsStore, word);
+          await putLocal(inbox, tombstone(item, now, "normalized"));
           return { ok: true, word: toWord(word) };
         });
       },
@@ -992,7 +1042,7 @@ export function createIndexedDbRepository(
         const cards: ReviewQueue["cards"] = [];
         for (const { card } of chosen) {
           const stored = await database.get("words", card.wordId);
-          if (isLive(stored)) cards.push({ card, word: toWord(stored) });
+          if (isLive(stored)) cards.push({ card: withoutSeq(card), word: toWord(stored) });
         }
 
         const settings = await readSettings();
@@ -1023,12 +1073,12 @@ export function createIndexedDbRepository(
             grade,
             reviewedAt: now.toISOString(),
             revlog: graded.revlog,
-            previousCard: previous,
+            previousCard: withoutSeq(previous),
             updatedAt: now.toISOString(),
           };
-          await tx.objectStore("cards").put(card);
-          await tx.objectStore("reviewLogs").put(log);
-          return { ok: true, card, log };
+          await putLocal(tx.objectStore("cards"), card);
+          await putLocal(tx.objectStore("reviewLogs"), log);
+          return { ok: true, card: withoutSeq(card), log };
         });
       },
 
@@ -1060,9 +1110,9 @@ export function createIndexedDbRepository(
             updatedAt: stampFrom(new Date(), current?.updatedAt ?? log.previousCard.updatedAt),
           };
           delete restored.deletedAt;
-          await cards.put(restored);
-          await logs.put(tombstone(log, new Date()));
-          return { ok: true, card: restored };
+          await putLocal(cards, restored);
+          await putLocal(logs, tombstone(log, new Date()));
+          return { ok: true, card: withoutSeq(restored) };
         });
       },
 
@@ -1072,7 +1122,7 @@ export function createIndexedDbRepository(
         for (const card of await database.getAll("cards")) {
           if (!isLive(card) || !card.leech) continue;
           const stored = await database.get("words", card.wordId);
-          if (isLive(stored)) result.push({ card, word: toWord(stored) });
+          if (isLive(stored)) result.push({ card: withoutSeq(card), word: toWord(stored) });
         }
         return result;
       },
@@ -1093,7 +1143,9 @@ export function createIndexedDbRepository(
           source: input.source,
           updatedAt: new Date().toISOString(),
         };
-        await (await db()).put("activity", log);
+        await inTransaction(["activity"], async (tx) => {
+          await putLocal(tx.objectStore("activity"), log);
+        });
         return log;
       },
 
@@ -1121,7 +1173,7 @@ export function createIndexedDbRepository(
           const stored = await store.get(SETTINGS_KEY);
           const current = applySettingsPatch(DEFAULT_SETTINGS, isLive(stored) ? stored : {});
           const next = applySettingsPatch(current, patch);
-          await store.put(
+          await putLocal(store,
             { ...next, id: SETTINGS_KEY, updatedAt: stampFrom(new Date(), stored?.updatedAt) },
             SETTINGS_KEY,
           );
@@ -1151,7 +1203,7 @@ export function createIndexedDbRepository(
             createdAt: nowIso,
             updatedAt: nowIso,
           };
-          await store.put({ ...video, youtubeKey: youtubeId });
+          await putLocal(store, { ...video, youtubeKey: youtubeId });
           return { ok: true, video };
         });
       },
@@ -1194,8 +1246,8 @@ export function createIndexedDbRepository(
             updatedAt: stampFrom(now, stored.updatedAt),
           };
           if (understanding !== undefined) next.understanding = understanding;
-          await tx.objectStore("activity").put(log);
-          await videos.put(next);
+          await putLocal(tx.objectStore("activity"), log);
+          await putLocal(videos, next);
           return { ok: true, video: toVideo(next) };
         });
       },
@@ -1211,7 +1263,7 @@ export function createIndexedDbRepository(
           if (stored.activityId) {
             const activity = tx.objectStore("activity");
             const log = await activity.get(stored.activityId);
-            if (isLive(log)) await activity.put(tombstone(log, new Date()));
+            if (isLive(log)) await putLocal(activity, tombstone(log, new Date()));
           }
           const next: StoredVideo = {
             ...stored,
@@ -1221,7 +1273,7 @@ export function createIndexedDbRepository(
           delete next.watchedAt;
           delete next.understanding;
           delete next.activityId;
-          await videos.put(next);
+          await putLocal(videos, next);
           return { ok: true, video: toVideo(next) };
         });
       },
@@ -1232,7 +1284,7 @@ export function createIndexedDbRepository(
           const stored = await store.get(id);
           if (!isLive(stored)) return undefined;
           // Any minutes already logged for this video stay: that time really was spent.
-          await store.put(tombstone(stored, new Date(), "youtubeKey"));
+          await putLocal(store, tombstone(stored, new Date(), "youtubeKey"));
           return toVideo(stored);
         });
       },
@@ -1254,7 +1306,7 @@ export function createIndexedDbRepository(
               createdAt: nowIso,
               updatedAt: nowIso,
             };
-            await tx.objectStore("speakingSessions").put(saved);
+            await putLocal(tx.objectStore("speakingSessions"), saved);
 
             for (const error of report.errors) {
               const row: SpeakingError = {
@@ -1268,7 +1320,7 @@ export function createIndexedDbRepository(
               };
               const note = cleanOptional(error.note);
               if (note !== undefined) row.note = note;
-              await tx.objectStore("speakingErrors").put(row);
+              await putLocal(tx.objectStore("speakingErrors"), row);
             }
 
             // New words go to the inbox like any captured word. A word that is blank, already
@@ -1301,7 +1353,7 @@ export function createIndexedDbRepository(
 
       async listErrors(sessionId: string) {
         const rows = await (await db()).getAllFromIndex("speakingErrors", "by-sessionId", sessionId);
-        return rows.filter(isLive);
+        return rows.filter(isLive).map(withoutSeq);
       },
     },
 
@@ -1376,18 +1428,57 @@ export function createIndexedDbRepository(
     },
 
     sync: {
+      async instanceId(): Promise<string> {
+        const tx = (await db()).transaction("syncMeta", "readwrite");
+        const saved = await tx.store.get("instance");
+        const instanceId = saved?.instanceId || crypto.randomUUID();
+        if (!saved?.instanceId) await tx.store.put({ instanceId }, "instance");
+        await tx.done;
+        return instanceId;
+      },
+
+      async upgradeMaxLocalSeq(store: SyncStore): Promise<number | null> {
+        return (await (await db()).get("syncMeta", store))?.upgradeMaxSeq ?? null;
+      },
+
+      async maxLocalSeqThrough(store: SyncStore, isoTime: string): Promise<number> {
+        const tx = (await db()).transaction([store, "syncMeta"]);
+        const upgradeMax = (await tx.objectStore("syncMeta").get(store))?.upgradeMaxSeq ?? 0;
+        if (upgradeMax === 0) {
+          await tx.done;
+          return 0;
+        }
+        let cursor = await tx.objectStore(store).index("by-localSeq")
+          .openCursor(IDBKeyRange.bound(1, upgradeMax), "prev");
+        let settled = 0;
+        while (cursor) {
+          if (cursor.value.updatedAt <= isoTime) {
+            settled = cursor.value.localSeq ?? 0;
+            break;
+          }
+          cursor = await cursor.continue();
+        }
+        await tx.done;
+        return settled;
+      },
+
+      async listChangedAfterSeq(store: SyncStore, seq: number): Promise<SyncRow[]> {
+        const rows = await (await db()).getAllFromIndex(store, "by-localSeq", IDBKeyRange.lowerBound(seq, true));
+        return rows.map((row) => toSyncRow(store, row as unknown as Loose));
+      },
+
       async listChangedSince(store: SyncStore, isoTime: string): Promise<SyncRow[]> {
         const database = await db();
         if (store === "settings") {
           // One record under a fixed key; it has no useful range to query.
           const stored = await database.get("settings", SETTINGS_KEY);
-          return stored && stored.updatedAt > isoTime ? [toSyncRow("settings", stored)] : [];
+          return stored && stored.updatedAt > isoTime ? [withoutSeq(toSyncRow("settings", stored))] : [];
         }
         // The index is sorted by updatedAt, so this is a range query: strictly after isoTime.
         const rows = await (database as unknown as {
           getAllFromIndex(store: string, index: string, range: IDBKeyRange): Promise<Loose[]>;
         }).getAllFromIndex(store, "by-updatedAt", IDBKeyRange.lowerBound(isoTime, true));
-        return rows.map((row) => toSyncRow(store, row));
+        return rows.map((row) => withoutSeq(toSyncRow(store, row)));
       },
 
       async applyCardBundle(sent, card, logs) {
@@ -1403,7 +1494,7 @@ export function createIndexedDbRepository(
               const version = sent[store].find((r) => r.id === row.id);
               // A logs-only group must not overwrite an unsubmitted local card.
               if (local && (!version || local.updatedAt !== version.updatedAt)) continue;
-              await os.put(row);
+              await os.put({ ...row, localSeq: local?.localSeq ?? 0 });
             }
           }
         });
@@ -1417,16 +1508,23 @@ export function createIndexedDbRepository(
           const cards = tx.objectStore("cards");
           const local = await cards.get(sentLocal.id);
           if (sentLocal.id === serverCard.id) {
-            await cards.put(serverCard);
+            await cards.put({ ...serverCard, localSeq: local?.localSeq ?? 0 });
             return;
           }
+          // Reserve before removing the maximum sequence, so re-keying cannot reuse it.
+          const rekeySeq = await nextLocalSeq(cards);
           // Free by-wordId even when the losing record is a tombstone.
           await cards.delete(sentLocal.id);
           const next = !serverCard.deletedAt && local && local.updatedAt !== sentLocal.updatedAt
             ? { ...local, id: serverCard.id, wordId: serverCard.wordId,
                 updatedAt: stampFrom(new Date(), local.updatedAt, serverCard.updatedAt) }
             : serverCard;
-          await cards.put(next);
+          if (next === serverCard) {
+            const existing = await cards.get(serverCard.id);
+            // Canonical adoption re-keys an existing logical row; retain its sequence
+            // so removing the loser cannot lower the store's sequence high-water mark.
+            await cards.put({ ...next, localSeq: Math.max(existing?.localSeq ?? 0, local?.localSeq ?? 0) });
+          } else await cards.put({ ...next, localSeq: rekeySeq });
           await moveCardReviewLogs(tx.objectStore("reviewLogs") as unknown as LooseStore,
             sentLocal.id, serverCard.id, new Date());
         });
@@ -1475,7 +1573,7 @@ export function createIndexedDbRepository(
               continue;
             }
 
-            const stored: Loose = store === "settings" ? { ...row, id: SETTINGS_KEY } : { ...row };
+            const stored: Loose = { ...row, ...(store === "settings" ? { id: SETTINGS_KEY } : {}), localSeq: local?.localSeq ?? 0 };
             const deleted = typeof row.deletedAt === "string";
 
             if (uniqueKey && !deleted) {
@@ -1494,7 +1592,7 @@ export function createIndexedDbRepository(
                   continue;
                 }
                 // The remote row is newer: the local twin loses. Free its unique key first.
-                await os.put(tombstone(other as { updatedAt: string }, now, uniqueKey.field));
+                await putLocal(os, tombstone(other as { updatedAt: string }, now, uniqueKey.field));
                 if (store === "words") {
                   await moveCardAfterWordTwin(
                     tx.objectStore("cards") as unknown as LooseStore,
@@ -1516,7 +1614,7 @@ export function createIndexedDbRepository(
                 result.conflicts += 1;
                 if (!deleted && isLive(other as { deletedAt?: string })) {
                   // Preserve both branch candidates until the server can choose under its lock.
-                  await os.put({ ...other, updatedAt: stampFrom(now, other.updatedAt as string, row.updatedAt as string) });
+                  await putLocal(os, { ...other, updatedAt: stampFrom(now, other.updatedAt as string, row.updatedAt as string) });
                   result.skipped += 1;
                   continue;
                 }
@@ -1533,6 +1631,8 @@ export function createIndexedDbRepository(
                   row.id as string,
                   now,
                 );
+                // Transfer the replaced logical row's sequence across its identity change.
+                stored.localSeq = Math.max(Number(stored.localSeq), Number(other.localSeq ?? 0));
                 await os.delete(other.id as string);
               }
             }
@@ -1563,7 +1663,7 @@ export function createIndexedDbRepository(
         await inTransaction([...names], async (tx) => {
           for (const name of names) await tx.objectStore(name).clear();
           // The app cannot work without its two books, so they come back (fresh, fixed ids).
-          for (const book of seedBooks()) await tx.objectStore("books").put(book);
+          for (const book of seedBooks()) await tx.objectStore("books").put({ ...book, localSeq: 0 });
         });
       },
     },

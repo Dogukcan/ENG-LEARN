@@ -63,7 +63,7 @@ describe("upgrade v3 -> v4", () => {
     expect((await repo.activity.listForDay("2026-11-04"))[0]?.seconds).toBe(600);
 
     const raw = await openDB(name);
-    expect(raw.version).toBe(5);
+    expect(raw.version).toBe(6);
     const inbox = await raw.get("inbox", "i1");
     expect(inbox?.updatedAt).toBe(created); // guessed from createdAt
     expect((await raw.get("words", "w1"))?.updatedAt).toBe("2026-11-02T08:00:00.000Z"); // kept

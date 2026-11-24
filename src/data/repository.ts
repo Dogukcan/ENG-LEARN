@@ -235,6 +235,7 @@ export type SyncStore = (typeof SYNC_STORES)[number];
 export interface SyncRow {
   id: string;
   updatedAt: string;
+  localSeq?: number;
   deletedAt?: string;
   [field: string]: unknown;
 }
@@ -371,6 +372,15 @@ export interface Repository {
   };
   /** The sync engine's door. It does not notify subscribers when it only READS. */
   sync: {
+    /** Stable identity of this local database; creates and stores one if missing. */
+    instanceId(): Promise<string>;
+    /** Local changes in sequence order, strictly after the per-store cursor. */
+    listChangedAfterSeq(store: SyncStore, seq: number): Promise<SyncRow[]>;
+    /** Highest sequence assigned by the v6 upgrade, or null for a fresh v6 database. */
+    upgradeMaxLocalSeq(store: SyncStore): Promise<number | null>;
+    /** Largest remaining upgrade sequence at or before a legacy timestamp cursor;
+     * excludes post-upgrade writes and returns 0 when no upgrade boundary exists. */
+    maxLocalSeqThrough(store: SyncStore, isoTime: string): Promise<number>;
     /** Rows of a store whose `updatedAt` is after `isoTime`, deleted rows included, oldest first. */
     listChangedSince(store: SyncStore, isoTime: string): Promise<SyncRow[]>;
     /**
