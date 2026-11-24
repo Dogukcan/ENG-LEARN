@@ -160,88 +160,91 @@ export function InboxTriage({ inbox, queue, books, addedCount, onOpenAdd, onRelo
 
   return (
     <>
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-section leading-[1.25] font-semibold text-text">Gelen kutusu</h2>
-        {current ? (
-          <span className="num text-small font-semibold text-muted">
-            {processed + 1} / {total}
-          </span>
-        ) : null}
-      </div>
-
-      <div role="status" aria-live="polite">
-        {visibleUndo ? (
-          <div className="flex items-center justify-between gap-2 px-0.5 text-small text-muted">
-            <span>
-              {visibleUndo.item.word}: {UNDO_LABEL[visibleUndo.status]}
+      <Panel tactile as="section" aria-label="Gelen kutusu" padding="sm" className="flex min-w-0 flex-col gap-3.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-section leading-[1.25] font-semibold text-text">Gelen kutusu</h2>
+          {current ? (
+            <span className="num text-small font-semibold text-muted">
+              {processed + 1} / {total}
             </span>
-            {visibleUndo.status !== "learning" ? (
-              <Button
-                ref={undoRef}
-                variant="text"
-                onClick={undoLast}
-                className="shrink-0 font-semibold underline underline-offset-[3px]"
-              >
-                Geri al
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {saveError ? <p className="px-0.5 text-small text-muted">{saveError}</p> : null}
-      </div>
-
-      {current ? (
-        <div className="flex flex-col gap-3.5">
-          {/* The ref sits on a plain div because Panel does not accept a ref. */}
-          <div ref={cardRef}>
-          <Panel as="article" className="flex flex-col gap-2.5">
-            <p className="text-[28px] leading-[1.15] font-semibold tracking-[-0.02em] text-text">{current.word}</p>
-            {current.meaningTr ? (
-              <p className="text-body leading-[1.35] text-muted">{current.meaningTr}</p>
-            ) : null}
-            {current.sentence ? (
-              <p className="text-[18px] leading-[1.45] break-words text-text">
-                <SentenceWithWord sentence={current.sentence} word={current.word} />
-              </p>
-            ) : null}
-            <p className="text-small leading-[1.3] text-muted">{formatSource(current.source, books)}</p>
-            {current.previousStatus ? (
-              <p className="text-small leading-[1.3] text-muted">
-                {current.previousStatus === "known" ? "Daha önce: biliyorum" : "Daha önce: yok saydın"}
-              </p>
-            ) : null}
-          </Panel>
-          </div>
-
-          {limitReached ? (
-            <DisabledReason id="kelime-limit-reason">{`Bugünkü yeni kart sınırı doldu (${queue.newLimit})`}</DisabledReason>
           ) : null}
-
-          <div className="grid grid-cols-3 gap-2">
-            <Button onClick={() => decide("ignored")}>Yok say</Button>
-            <Button ref={knowRef} onClick={() => decide("known")}>
-              Biliyorum
-            </Button>
-            <Button
-              ref={learnRef}
-              onClick={() => decide("learning")}
-              disabled={limitReached}
-              aria-describedby={limitReached ? "kelime-limit-reason" : undefined}
-              // "!" makes these win over the neutral look: "Öğren" is the heavier choice (700, 1px text border).
-              className="border-text! font-bold! aria-disabled:border-control!"
-            >
-              Öğren
-            </Button>
-          </div>
         </div>
-      ) : (
-        <Panel className="flex flex-col gap-3.5">
+
+        <div role="status" aria-live="polite">
+          {visibleUndo ? (
+            <div className="flex items-center justify-between gap-2 px-0.5 text-small text-muted">
+              <span>
+                {visibleUndo.item.word}: {UNDO_LABEL[visibleUndo.status]}
+              </span>
+              {visibleUndo.status !== "learning" ? (
+                <Button
+                  tactile
+                  ref={undoRef}
+                  variant="text"
+                  onClick={undoLast}
+                  className="shrink-0 font-semibold underline underline-offset-[3px]"
+                >
+                  Geri al
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {saveError ? <p className="px-0.5 text-small text-muted">{saveError}</p> : null}
+        </div>
+
+        {current ? (
+          <div className="flex flex-col gap-3.5">
+            {/* The ref sits on a plain div because Panel does not accept a ref. */}
+            <div ref={cardRef}>
+            <Panel tactile as="article" padding="sm" className="flex min-w-0 flex-col gap-2.5 wrap-anywhere">
+              <p className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">{current.word}</p>
+              {current.meaningTr ? (
+                <p className="text-body leading-[1.35] text-muted">{current.meaningTr}</p>
+              ) : null}
+              {current.sentence ? (
+                <p className="text-body leading-[1.45] break-words text-text">
+                  <SentenceWithWord sentence={current.sentence} word={current.word} />
+                </p>
+              ) : null}
+              <p className="text-small leading-[1.3] text-muted">{formatSource(current.source, books)}</p>
+              {current.previousStatus ? (
+                <p className="text-small leading-[1.3] text-muted">
+                  {current.previousStatus === "known" ? "Daha önce: biliyorum" : "Daha önce: yok saydın"}
+                </p>
+              ) : null}
+            </Panel>
+            </div>
+
+            {limitReached ? (
+              <DisabledReason id="kelime-limit-reason">{`Bugünkü yeni kart sınırı doldu (${queue.newLimit})`}</DisabledReason>
+            ) : null}
+
+            <div className="grid grid-cols-3 gap-2">
+              <Button tactile onClick={() => decide("ignored")}>Yok say</Button>
+              <Button tactile ref={knowRef} onClick={() => decide("known")}>
+                Biliyorum
+              </Button>
+              <Button
+                tactile
+                ref={learnRef}
+                onClick={() => decide("learning")}
+                disabled={limitReached}
+                aria-describedby={limitReached ? "kelime-limit-reason" : undefined}
+                // "!" makes these win over the neutral look: "Öğren" is the heavier choice (700, 1px text border).
+                className="border-text! font-bold! aria-disabled:border-control!"
+              >
+                Öğren
+              </Button>
+            </div>
+          </div>
+        ) : (
           <p className="text-body leading-[1.4] text-muted">Gelen kutusu boş.</p>
-          <Button ref={emptyAddRef} onClick={onOpenAdd}>
-            Kelime ekle
-          </Button>
-        </Panel>
-      )}
+        )}
+      </Panel>
+      <Panel tactile as="section" aria-labelledby="kelime-add-title" padding="sm" className="flex flex-col gap-3.5">
+        <h2 id="kelime-add-title" className="text-section font-semibold text-text">Kelime ekle</h2>
+        <Button tactile ref={emptyAddRef} onClick={onOpenAdd}>Kelime ekle</Button>
+      </Panel>
     </>
   );
 }

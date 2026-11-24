@@ -1,16 +1,20 @@
 import { useRef, useState } from "react";
 import { Button, LiveRegion, Sheet } from "../components/ui/index.ts";
 import { useRepoData } from "../data/react";
+import { toLocalDay } from "../data";
 import { AddWordForm } from "../features/kelime/AddWordForm.tsx";
 import { InboxTriage } from "../features/kelime/InboxTriage.tsx";
-import { ReviewRow } from "../features/kelime/ReviewRow.tsx";
+import { kelimeHeroAction, kelimeHeroSubtitle } from "../features/kelime/heroLabels.ts";
+import { doneMinutes } from "../features/okuma/logic.ts";
+import { SkillHero } from "../features/skill/SkillHero.tsx";
+import { heroRemaining } from "../features/skill/heroLogic.ts";
 import { ReviewSession } from "../features/review/ReviewSession.tsx";
 import { recordReviewMinutes } from "../features/review/recordReview.ts";
 import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
 import { useTimer } from "../features/timer/TimerProvider.tsx";
 
 /**
- * Kelime screen, variant 2 "Tek tek" (chosen as the default in the frozen UI direction).
+ * Skill ring hero with the existing "Tek tek" inbox triage.
  * This component only loads data and owns the two dialogs; the rows live in src/features/kelime.
  */
 export function KelimeScreen() {
@@ -22,23 +26,45 @@ export function KelimeScreen() {
 
   // Reloaded by useRepoData after every repository write, so a review or a triage updates this screen.
   const { data, error, reload } = useRepoData(async (repo) => {
-    const [inbox, queue, books] = await Promise.all([
+    const now = new Date();
+    const [inbox, queue, books, minutes, settings] = await Promise.all([
       repo.inbox.list(),
-      repo.cards.getReviewQueue(new Date()),
+      repo.cards.getReviewQueue(now),
       repo.books.list(),
+      repo.activity.minutesPerBlockForDay(toLocalDay(now)),
+      repo.settings.get(),
     ]);
-    return { inbox, queue, books };
+    return { inbox, queue, books, loggedMinutes: minutes.kelime, plan: settings.blockPlanMinutes.kelime };
   }, []);
 
   // The queue and newToday are computed from "now" at load time, so reload when the app wakes up and
   // every minute (a card marked "Unuttum" becomes due minutes later, and the local day can roll over).
   useReloadOnWake(reload);
 
-  // Why returnFocusTo: when the inbox was empty, the "Kelime ekle" button that opened the sheet
-  // disappears after the first save, so the Sheet cannot return focus to it. It falls back to the
-  // header "+" button instead of letting focus drop to <body>.
+  // Keep the existing stable header focus target after adding words, even when reloads
+  // change the inbox or the hero action that opened the sheet.
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const closeAdd = () => setAddOpen(false);
+  const runningSeconds = timer.running === "kelime" ? timer.elapsedSeconds : null;
+  const done = doneMinutes(data?.loggedMinutes ?? 0, runningSeconds ?? 0);
+  const subtitle = data ? kelimeHeroSubtitle(data.queue) : "";
+  const action = kelimeHeroAction(runningSeconds !== null, timer.elapsedSeconds, data?.queue.cards.length ?? 0);
+
+  function onHeroAction() {
+    setReviewMessage("");
+    if (timer.running === "kelime") {
+      timer.stop().catch(() => setReviewMessage("Süre kaydedilemedi. Tekrar dene."));
+    } else if (data && data.queue.cards.length > 0) {
+      // Save the running block before review so its minutes are not counted twice.
+      const stopFirst = timer.running ? timer.stop() : Promise.resolve();
+      stopFirst.then(
+        () => setReviewOpen(true),
+        () => setReviewMessage("Süre kaydedilemedi. Tekrar dene."),
+      );
+    } else {
+      setAddOpen(true);
+    }
+  }
 
   return (
     <section aria-labelledby="kelime-screen-title" className="flex flex-col gap-3.5">
@@ -46,7 +72,7 @@ export function KelimeScreen() {
         <h1 id="kelime-screen-title" className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">
           Kelime
         </h1>
-        <Button ref={addButtonRef} variant="icon" aria-label="Kelime ekle" onClick={() => setAddOpen(true)}>
+        <Button tactile ref={addButtonRef} variant="icon" aria-label="Kelime ekle" onClick={() => setAddOpen(true)}>
           <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 fill-none stroke-current stroke-2 [stroke-linecap:round]">
             <path d="M12 5v14M5 12h14" />
           </svg>
@@ -55,18 +81,18 @@ export function KelimeScreen() {
 
       {data ? (
         <>
-          <ReviewRow
-            queue={data.queue}
-            onStart={() => {
-              setReviewMessage("");
-              // One timer rule (same as Bugün): a running timer is stopped and saved first, otherwise the
-              // same minutes would be counted for both that block and Kelime.
-              const stopFirst = timer.running ? timer.stop() : Promise.resolve();
-              stopFirst.then(
-                () => setReviewOpen(true),
-                () => setReviewMessage("Süre kaydedilemedi. Tekrar dene."),
-              );
-            }}
+          <SkillHero
+            block="kelime"
+            title="Kelime"
+            doneMinutes={done}
+            planMinutes={data.plan}
+            runningSeconds={runningSeconds}
+            subtitle={subtitle}
+            chips={[heroRemaining(done, data.plan)]}
+            actionLabel={action.label}
+            actionAriaLabel={action.ariaLabel}
+            onAction={onHeroAction}
+            detail={<p className="text-body text-muted">{subtitle}</p>}
           />
           <LiveRegion visible>{reviewMessage}</LiveRegion>
           <InboxTriage
@@ -81,7 +107,7 @@ export function KelimeScreen() {
       ) : error ? (
         <div role="alert" className="flex flex-col items-start gap-3">
           <p className="text-body leading-[1.4] text-muted">Kelimeler yüklenemedi. Tekrar dene.</p>
-          <Button onClick={reload}>Tekrar dene</Button>
+          <Button tactile onClick={reload}>Tekrar dene</Button>
         </div>
       ) : (
         <p role="status" className="text-body text-muted">

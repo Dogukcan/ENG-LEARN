@@ -123,7 +123,7 @@ export function AddWordForm({ onClose, onAdded }: AddWordFormProps) {
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3.5">
       <div className="flex items-center justify-between gap-3">
-        <Button variant="text" onClick={onClose} className="min-w-[68px]">
+        <Button tactile variant="text" onClick={onClose} className="min-w-[68px]">
           Vazgeç
         </Button>
         <h2 className="text-section leading-[1.25] font-semibold text-text">Kelime ekle</h2>
@@ -197,7 +197,7 @@ export function AddWordForm({ onClose, onAdded }: AddWordFormProps) {
         />
       ) : null}
 
-      <Button type="submit">Kaydet</Button>
+      <Button tactile type="submit">Kaydet</Button>
       <LiveRegion visible>{liveMessage}</LiveRegion>
     </form>
   );
