@@ -7,6 +7,7 @@ import {
   consistencyText,
   formatDay,
   listeningProjectionText,
+  monthlyByBlock,
   rangeOfLastDays,
   reviewRateText,
   speakingRows,
@@ -62,6 +63,16 @@ describe("weeklyByBlock", () => {
 });
 
 describe("buildMonthGrid and consistencyText", () => {
+  it("totals only the last 30 days and keeps empty days in the monthly plan", () => {
+    const days = Array.from({ length: 31 }, (_, i) => day("2026-11-18", { okuma: i === 0 ? 999 : 1.25 }));
+    expect(monthlyByBlock(days, { okuma: 20, kelime: 15, dinleme: 25, konusma: 0 })).toEqual([
+      { block: "okuma", done: 38, plan: 600 },
+      { block: "kelime", done: 0, plan: 450 },
+      { block: "dinleme", done: 0, plan: 750 },
+      { block: "konusma", done: 0, plan: 0 },
+    ]);
+    expect(monthlyByBlock([], zero).every((row) => row.done === 0 && row.plan === 0)).toBe(true);
+  });
   it("marks days that reach the minimum", () => {
     const grid = buildMonthGrid([day("2026-11-17", { okuma: 19 }), day("2026-11-18", { okuma: 20 })], 20);
     expect(grid.map((cell) => cell.met)).toEqual([false, true]);

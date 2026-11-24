@@ -132,6 +132,18 @@ export function weeklyByBlock(
 
 // ---------- 30-day grid ----------
 
+/** Minutes in the last 30 days against 30 days of the block plan, including empty days. */
+export function monthlyByBlock(
+  days: readonly DayMinutes[],
+  planPerDay: Record<SkillBlock, number>,
+): WeeklyBlockRow[] {
+  return SKILL_BLOCKS.map((block) => ({
+    block,
+    done: wholeMinutes(days.slice(-30).reduce((sum, entry) => sum + entry.minutes[block], 0)),
+    plan: planPerDay[block] * 30,
+  }));
+}
+
 export interface MonthCell {
   day: LocalDay;
   met: boolean;

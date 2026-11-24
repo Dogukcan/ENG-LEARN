@@ -1,7 +1,7 @@
-// İstatistik screen, variant 2 "Özet". It loads real numbers from repository.stats.* and draws them;
+// İstatistik screen with today's skill rings and repository-backed statistics.
 // every sentence and size is decided in src/features/istatistik/statsLogic.ts (pure, tested).
 
-import { LoadError, Panel, ProgressTrack } from "../components/ui";
+import { Button, LoadError, Panel, ProgressTrack } from "../components/ui";
 import type { Block } from "../components/ui";
 import { SKILL_BLOCKS, toLocalDay } from "../data";
 import type { SkillBlock } from "../data";
@@ -17,6 +17,7 @@ import {
   consistencyText,
   goalLabel,
   listeningProjectionText,
+  monthlyByBlock,
   percent,
   rangeOfLastDays,
   reviewRateText,
@@ -25,6 +26,9 @@ import {
   weeklyByBlock,
 } from "../features/istatistik/statsLogic";
 import { BLOCK_NAMES } from "../features/bugun/todayLogic";
+import { SkillMiniRing } from "../features/skill/SkillMiniRing";
+import { doneMinutes } from "../features/okuma/logic";
+import { useTimer } from "../features/timer/TimerProvider";
 
 // Full literal class names so Tailwind can find them (never built from a template string).
 const SEGMENT_BG: Record<SkillBlock, string> = {
@@ -41,10 +45,10 @@ function goBack() {
 function Kpi({ label, value, block }: { label: string; value: string; block?: Block }) {
   const subColor = block === "dinleme" ? "text-dinleme-ink" : block === "kelime" ? "text-kelime-ink" : "text-muted";
   return (
-    <div className="flex min-h-27 flex-col justify-between rounded-card bg-surface p-4">
+    <Panel tactile padding="sm" className="flex min-h-27 min-w-0 flex-col justify-between gap-2">
       <span className={`text-small ${subColor}`}>{label}</span>
-      <span className={`num leading-[1.1] ${value.includes(" ") && value.length > 8 ? "text-[20px]" : "text-[28px]"} font-semibold tracking-[-0.02em] text-text`}>{value}</span>
-    </div>
+      <span className={`num break-words leading-tight ${value.includes(" ") && value.length > 8 ? "text-section" : "text-title"} font-semibold tracking-tight text-text`}>{value}</span>
+    </Panel>
   );
 }
 
@@ -80,10 +84,11 @@ function BarRow({
 }
 
 export function IstatistikScreen() {
+  const timer = useTimer();
   const { data, error, reload } = useRepoData(async (repo) => {
     const today = toLocalDay();
     const range = rangeOfLastDays(today, 30);
-    const [settings, days, consistency, listeningTotal, words, bands, success, leeches, speaking] = await Promise.all([
+    const [settings, days, consistency, listeningTotal, words, bands, success, leeches, speaking, todayMinutes] = await Promise.all([
       repo.settings.get(),
       repo.stats.minutesPerBlockPerDay(range),
       repo.stats.consistency(today),
@@ -93,8 +98,9 @@ export function IstatistikScreen() {
       repo.stats.reviewSuccessRate(today),
       repo.stats.leechCount(),
       repo.stats.speakingErrorsWeekOverWeek(today),
+      repo.activity.minutesPerBlockForDay(today),
     ]);
-    return { today, settings, days, consistency, listeningTotal, words, bands, success, leeches, speaking };
+    return { today, settings, days, consistency, listeningTotal, words, bands, success, leeches, speaking, todayMinutes };
   }, []);
 
   // "Today" and the 30-day range are fixed at load time; refresh them across midnight.
@@ -102,14 +108,13 @@ export function IstatistikScreen() {
 
   const header = (
     <>
-      <button
-        type="button"
+      <Button tactile variant="neutral"
         onClick={goBack}
         aria-label="Bugün ekranına dön"
-        className="flex min-h-11 items-center self-start pr-3 text-body font-semibold text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text"
+        className="self-start px-3"
       >
         ‹ Bugün
-      </button>
+      </Button>
       <header className="flex flex-col gap-1">
         <h1 id="istatistik-screen-title" className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">
           İstatistik
@@ -142,6 +147,7 @@ export function IstatistikScreen() {
   const minimum = settings.dailyMinimumMinutes;
   const week = buildWeekColumns(days, minimum, today);
   const weekly = weeklyByBlock(days, settings.blockPlanMinutes);
+  const monthly = monthlyByBlock(days, settings.blockPlanMinutes);
   const grid = buildMonthGrid(days, minimum);
   const bandList = bandRows(bands);
   const bandMax = Math.max(1, ...bandList.map((row) => row.known));
@@ -154,6 +160,23 @@ export function IstatistikScreen() {
     <section aria-labelledby="istatistik-screen-title" className="flex flex-col gap-3.5">
       {header}
 
+      <Panel tactile as="section" padding="sm" aria-labelledby="ist-bugun" className="flex min-w-0 flex-col gap-4">
+        <h2 id="ist-bugun" className="text-section font-semibold leading-tight">
+          Bugün dört beceri
+        </h2>
+        <div className="grid grid-cols-2 gap-y-4 min-[360px]:grid-cols-4">
+          {SKILL_BLOCKS.map((block) => (
+            <SkillMiniRing
+              key={block}
+              block={block}
+              label={BLOCK_NAMES[block]}
+              doneMinutes={doneMinutes(data.todayMinutes[block], timer.running === block ? timer.elapsedSeconds : 0)}
+              planMinutes={settings.blockPlanMinutes[block]}
+            />
+          ))}
+        </div>
+      </Panel>
+
       <div className="grid grid-cols-2 gap-2.5">
         <Kpi label="Toplam dinleme" value={formatHoursMinutes(listeningTotal)} block="dinleme" />
         <Kpi label="Bilinen kelime" value={String(sumBands(bands))} block="kelime" />
@@ -161,7 +184,7 @@ export function IstatistikScreen() {
         <Kpi label="Sorunlu kelime" value={String(leeches)} />
       </div>
 
-      <Panel as="section" padding="sm" aria-labelledby="ist-hafta" className="flex flex-col gap-3.5">
+      <Panel tactile as="section" padding="sm" aria-labelledby="ist-hafta" className="flex flex-col gap-3.5">
         <h2 id="ist-hafta" className="text-section leading-[1.2] font-semibold tracking-[-0.01em]">
           Bu hafta
         </h2>
@@ -218,7 +241,16 @@ export function IstatistikScreen() {
         </div>
       </Panel>
 
-      <Panel as="section" padding="sm" aria-labelledby="ist-duzen" className="flex flex-col gap-3.5">
+      <Panel tactile as="section" padding="sm" aria-labelledby="ist-ay" className="flex flex-col gap-3.5">
+        <h2 id="ist-ay" className="text-section font-semibold leading-tight">Son 30 gün</h2>
+        {monthly.map((row) => (
+          <BarRow key={row.block} label={BLOCK_NAMES[row.block]}
+            valueText={`${row.done}${NBSP}/${NBSP}${row.plan}${NBSP}dk`}
+            value={row.done} max={row.plan} block={row.block} />
+        ))}
+      </Panel>
+
+      <Panel tactile as="section" padding="sm" aria-labelledby="ist-duzen" className="flex flex-col gap-3.5">
         <h2 id="ist-duzen" className="text-section leading-[1.2] font-semibold tracking-[-0.01em]">
           Düzen
         </h2>
@@ -246,7 +278,7 @@ export function IstatistikScreen() {
         </div>
       </Panel>
 
-      <Panel as="section" padding="sm" aria-labelledby="ist-dinleme" className="flex flex-col gap-3.5">
+      <Panel tactile as="section" padding="sm" aria-labelledby="ist-dinleme" className="flex flex-col gap-3.5">
         <h2 id="ist-dinleme" className="text-section leading-[1.2] font-semibold tracking-[-0.01em]">
           Dinleme hedefi
         </h2>
@@ -263,7 +295,7 @@ export function IstatistikScreen() {
         
       </Panel>
 
-      <Panel as="section" padding="sm" aria-labelledby="ist-kelime" className="flex flex-col gap-3.5">
+      <Panel tactile as="section" padding="sm" aria-labelledby="ist-kelime" className="flex flex-col gap-3.5">
         <h2 id="ist-kelime" className="text-section leading-[1.2] font-semibold tracking-[-0.01em]">
           Kelime aralıkları
         </h2>
@@ -285,7 +317,7 @@ export function IstatistikScreen() {
         </div>
       </Panel>
 
-      <Panel as="section" padding="sm" aria-labelledby="ist-konusma" className="flex flex-col gap-3.5">
+      <Panel tactile as="section" padding="sm" aria-labelledby="ist-konusma" className="flex flex-col gap-3.5">
         <h2 id="ist-konusma" className="text-section leading-[1.2] font-semibold tracking-[-0.01em]">
           Konuşma hataları
         </h2>
