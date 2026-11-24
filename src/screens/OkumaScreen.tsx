@@ -61,7 +61,7 @@ export function OkumaScreen() {
           actionAriaLabel={running === "okuma" ? "Okuma sayacını durdur" : "Okuma sayacını başlat"}
           onAction={() => {
             setMessage("");
-            void timer.toggle("okuma").catch(() => setMessage("Süre kaydedilemedi. Tekrar dene."));
+            void timer.toggle("okuma").catch(() => setMessage("Süre kaydedilemedi. Sayaç çalışmaya devam ediyor, tekrar dene."));
           }}
           detail={<p>Sayaç başlayınca süre kendiliğinden kaydedilir. Durdurunca tam dakika olarak eklenir.</p>}
         />

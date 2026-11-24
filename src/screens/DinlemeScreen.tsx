@@ -123,7 +123,7 @@ export function DinlemeScreen() {
           actionLabel={running === "dinleme" ? `Durdur · ${formatMMSS(elapsedSeconds)}` : "Dinlemeyi başlat"}
           actionAriaLabel={running === "dinleme" ? "Dinleme sayacını durdur" : "Dinleme sayacını başlat"}
           onAction={() => {
-            void timer.toggle("dinleme").catch(() => setStatus({ text: "Süre kaydedilemedi. Tekrar dene.", undoId: null }));
+            void timer.toggle("dinleme").catch(() => setStatus({ text: "Süre kaydedilemedi. Sayaç çalışmaya devam ediyor, tekrar dene.", undoId: null }));
           }}
           detail={<p>Sayaç başlayınca süre kendiliğinden kaydedilir. Uygulama dışında dinlediğin süreyi + ile ekleyebilirsin.</p>}
         />

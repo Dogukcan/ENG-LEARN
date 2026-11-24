@@ -80,7 +80,7 @@ export function KonusmaScreen() {
       await timer.toggle("konusma");
       if (!isRunning) setStep("2");
     } catch {
-      setMessage("Süre kaydedilemedi. Tekrar dene.");
+      setMessage("Süre kaydedilemedi. Sayaç çalışmaya devam ediyor, tekrar dene.");
     }
   }
 
