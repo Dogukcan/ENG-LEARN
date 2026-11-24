@@ -12,6 +12,7 @@ type SharedProps = NativeButtonProps & {
    * points at a visible reason (see DisabledReason) solves that.
    */
   disabled?: boolean;
+  tactile?: boolean;
   type?: "button" | "submit" | "reset";
 };
 
@@ -40,6 +41,16 @@ const PRIMARY: Record<Block, string> = {
   konusma: "bg-konusma-btn-bg text-konusma-btn-text not-aria-disabled:active:bg-konusma-btn-active",
 };
 
+const PRIMARY_EDGE: Record<Block, string> = {
+  okuma: "shadow-[0_4px_0_var(--okuma-btn-active)]",
+  kelime: "shadow-[0_4px_0_var(--kelime-btn-active)]",
+  dinleme: "shadow-[0_4px_0_var(--dinleme-btn-active)]",
+  konusma: "shadow-[0_4px_0_var(--konusma-btn-active)]",
+};
+
+const TACTILE_PRESS =
+  "not-aria-disabled:active:translate-y-[3px] not-aria-disabled:active:shadow-none transition-[translate,box-shadow,background-color] duration-120";
+
 const BASE =
   "inline-flex select-none items-center justify-center font-semibold " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text " +
@@ -53,18 +64,21 @@ const PRESS = "transition-[scale,background-color] duration-120 not-aria-disable
  * same sizes (touch targets of 44px or 56px) and the same press feedback.
  */
 export function Button(props: ButtonProps) {
-  const { variant = "neutral", block, disabled = false, className, onClick, type = "button", ...rest } = props;
+  const { variant = "neutral", block, disabled = false, tactile = false, className, onClick, type = "button", ...rest } = props;
 
   let look: string;
   switch (variant) {
     case "primary-block":
-      look = cx("h-14 w-full rounded-[14px] text-body", PRESS, PRIMARY[block ?? "kelime"]);
+      look = cx("h-14 w-full rounded-[14px] text-body", tactile ? TACTILE_PRESS : PRESS,
+        PRIMARY[block ?? "kelime"], tactile && PRIMARY_EDGE[block ?? "kelime"]);
       break;
     case "neutral":
       look = cx(
-        "h-14 w-full rounded-[14px] border border-control bg-surface text-body text-text",
-        "transition-[scale,background-color] duration-120",
-        "not-aria-disabled:active:scale-[0.97] not-aria-disabled:active:bg-control",
+        tactile
+          ? "h-14 w-full rounded-[14px] border-[1.5px] border-border bg-surface text-body text-text shadow-[0_4px_0_var(--border)]"
+          : "h-14 w-full rounded-[14px] border border-control bg-surface text-body text-text",
+        tactile ? TACTILE_PRESS : "transition-[scale,background-color] duration-120",
+        tactile ? "not-aria-disabled:active:bg-control" : "not-aria-disabled:active:scale-[0.97] not-aria-disabled:active:bg-control",
       );
       break;
     case "text":
@@ -76,8 +90,9 @@ export function Button(props: ButtonProps) {
     case "icon":
       look = cx(
         "size-11 shrink-0 rounded-full border border-control bg-surface text-text",
-        "transition-[scale,background-color] duration-120",
-        "not-aria-disabled:active:scale-[0.96] not-aria-disabled:active:bg-control",
+        tactile ? TACTILE_PRESS : "transition-[scale,background-color] duration-120",
+        tactile ? "not-aria-disabled:active:bg-control" : "not-aria-disabled:active:scale-[0.96] not-aria-disabled:active:bg-control",
+        tactile && "shadow-[0_3px_0_var(--border)]",
       );
       break;
   }

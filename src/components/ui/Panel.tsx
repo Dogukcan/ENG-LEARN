@@ -8,6 +8,7 @@ export interface PanelProps extends HTMLAttributes<HTMLElement> {
   as?: "div" | "section" | "article";
   /** Clip children to the rounded corners (needed when rows have their own background). */
   clip?: boolean;
+  tactile?: boolean;
   children?: ReactNode;
 }
 
@@ -26,13 +27,15 @@ export function Panel({
   padding = "md",
   as: Tag = "div",
   clip = false,
+  tactile = false,
   className,
   children,
   ...rest
 }: PanelProps) {
   return (
     <Tag
-      className={cx("rounded-card bg-surface text-text", PADDING[padding], clip && "overflow-hidden", className)}
+      className={cx("rounded-card bg-surface text-text", PADDING[padding], clip && "overflow-hidden",
+        tactile && "border-[1.5px] border-border shadow-[0_4px_0_var(--border)]", className)}
       {...rest}
     >
       {children}
