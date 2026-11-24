@@ -7,6 +7,7 @@ import {
   formatGoalDate,
   goalPercent,
   listCountText,
+  listeningSubtitle,
   paceFromDayMinutes,
   parseMinutes,
   thumbnailUrl,
@@ -114,5 +115,19 @@ describe("doneWithRunning", () => {
     expect(doneWithRunning(10.5, 30)).toBe(11);
     expect(doneWithRunning(0, 0)).toBe(0);
     expect(doneWithRunning(5, -20)).toBe(5);
+  });
+});
+
+
+describe("listeningSubtitle", () => {
+  it("formats lifetime listening against the shared goal", () => {
+    expect(listeningSubtitle(760)).toBe("Toplam 12 sa 40 dk / 50 sa");
+    expect(listeningSubtitle(0)).toBe("Toplam 0 dk / 50 sa");
+    expect(listeningSubtitle(60)).toBe("Toplam 1 sa / 50 sa");
+  });
+
+  it("keeps totals at and beyond the goal visible", () => {
+    expect(listeningSubtitle(3000)).toBe("Toplam 50 sa / 50 sa");
+    expect(listeningSubtitle(3061)).toBe("Toplam 51 sa 1 dk / 50 sa");
   });
 });

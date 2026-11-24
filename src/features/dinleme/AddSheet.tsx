@@ -213,7 +213,7 @@ function LinkForm({ active, onAdded }: LinkFormProps) {
         value={level}
         onChange={setLevel}
       />
-      <Button type="submit" variant="primary-block" block="dinleme">
+      <Button tactile type="submit" variant="primary-block" block="dinleme">
         Ekle
       </Button>
     </form>
@@ -282,7 +282,7 @@ function ExternalForm({ active, onAdded }: ExternalFormProps) {
         error={error}
         onChange={(event) => setMinutes(event.target.value)}
       />
-      <Button type="submit" variant="neutral">
+      <Button tactile type="submit" variant="neutral">
         Kaydet
       </Button>
     </form>
@@ -307,7 +307,7 @@ function SheetBody({ onClose, onAdded }: Omit<AddSheetProps, "open">) {
   return (
     <>
       <div className="flex items-center justify-between gap-2">
-        <Button variant="text" onClick={onClose}>
+        <Button tactile variant="text" onClick={onClose}>
           Vazgeç
         </Button>
         <h2 className="text-section leading-[1.25] font-semibold text-text">Ekle</h2>

@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, SegmentedControl } from "../components/ui/index.ts";
+import { Button, Panel, SegmentedControl } from "../components/ui/index.ts";
 import { addLocalDays, repository, toLocalDay } from "../data";
 import type { VideoUnderstanding } from "../data";
 import { useRepoData } from "../data/react";
 import { AddSheet } from "../features/dinleme/AddSheet.tsx";
 import { ListeningSummary } from "../features/dinleme/ListeningSummary.tsx";
-import { BAR_DAYS, doneWithRunning, formatDoneOfPlan, listCountText } from "../features/dinleme/logic/screen.ts";
+import { BAR_DAYS, doneWithRunning, listeningSubtitle, listCountText } from "../features/dinleme/logic/screen.ts";
 import { TodoList, WatchedList } from "../features/dinleme/VideoCards.tsx";
 import { useReloadOnWake } from "../features/time/useReloadOnWake.ts";
+import { SkillHero } from "../features/skill/SkillHero.tsx";
+import { heroRemaining } from "../features/skill/heroLogic.ts";
+import { formatMMSS } from "../features/timer/timerMath.ts";
 import { useTimer } from "../features/timer/TimerProvider.tsx";
 
 type ListTab = "todo" | "watched";
@@ -22,10 +25,11 @@ interface Status {
  * Dinleme screen, variant 2 "Sekmeli": a summary panel, one list at a time (İzlenecek / İzlendi)
  * and a bottom sheet to add a link or minutes heard outside the app. This component loads the
  * data and arranges the pieces; the pieces live in src/features/dinleme and the rules in logic/.
- * The Dinleme timer is not on this screen (the draft has none): it stays on Bugün.
+ * The skill hero controls the same shared Dinleme timer as Bugün.
  */
 export function DinlemeScreen() {
-  const { running, elapsedSeconds } = useTimer();
+  const timer = useTimer();
+  const { running, elapsedSeconds } = timer;
   const [listTab, setListTab] = useState<ListTab>("todo");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [askingId, setAskingId] = useState<string | null>(null);
@@ -100,19 +104,30 @@ export function DinlemeScreen() {
         <h1 id="dinleme-screen-title" className="text-title leading-[1.15] font-semibold tracking-[-0.02em] text-text">
           Dinleme
         </h1>
-        <div className="inline-flex items-center gap-2.5">
-          {data ? (
-            <span className="text-right text-body font-semibold whitespace-nowrap text-text tabular-nums">
-              {formatDoneOfPlan(done, data.plan)}
-            </span>
-          ) : null}
-          <Button variant="icon" aria-label="Link ya da dakika ekle" onClick={() => setSheetOpen(true)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 fill-none stroke-current stroke-2 [stroke-linecap:round]">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </Button>
-        </div>
+        <Button tactile variant="icon" aria-label="Link ya da dakika ekle" onClick={() => setSheetOpen(true)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 fill-none stroke-current stroke-2 [stroke-linecap:round]">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </Button>
       </header>
+
+      {data ? (
+        <SkillHero
+          block="dinleme"
+          doneMinutes={done}
+          planMinutes={data.plan}
+          runningSeconds={running === "dinleme" ? elapsedSeconds : null}
+          title="Dinleme"
+          subtitle={listeningSubtitle(data.total)}
+          chips={[heroRemaining(done, data.plan)]}
+          actionLabel={running === "dinleme" ? `Durdur · ${formatMMSS(elapsedSeconds)}` : "Dinlemeyi başlat"}
+          actionAriaLabel={running === "dinleme" ? "Dinleme sayacını durdur" : "Dinleme sayacını başlat"}
+          onAction={() => {
+            void timer.toggle("dinleme").catch(() => setStatus({ text: "Süre kaydedilemedi. Tekrar dene.", undoId: null }));
+          }}
+          detail={<p>Sayaç başlayınca süre kendiliğinden kaydedilir. Uygulama dışında dinlediğin süreyi + ile ekleyebilirsin.</p>}
+        />
+      ) : null}
 
       {error ? (
         <p role="alert" className="text-small font-medium text-negative">
@@ -142,8 +157,10 @@ export function DinlemeScreen() {
       {data ? (
         <>
           <ListeningSummary totalMinutes={data.total} dayMinutes={data.dayMinutes} planMinutes={data.plan} now={data.now} />
-          <SegmentedControl aria-label="Video listesi" options={tabOptions} value={listTab} onChange={setListTab} />
-          <p className="text-small leading-[1.35] text-muted tabular-nums">{listCountText(shown?.length ?? 0, shownMinutes)}</p>
+          <Panel tactile padding="sm" className="flex min-w-0 flex-col gap-3">
+            <SegmentedControl aria-label="Video listesi" options={tabOptions} value={listTab} onChange={setListTab} />
+            <p className="text-small leading-[1.35] text-muted tabular-nums">{listCountText(shown?.length ?? 0, shownMinutes)}</p>
+          </Panel>
           {listTab === "todo" ? (
             <TodoList
               videos={data.todo}

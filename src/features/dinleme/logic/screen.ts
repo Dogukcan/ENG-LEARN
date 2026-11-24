@@ -3,7 +3,7 @@
 
 import type { VideoLevel, VideoUnderstanding } from "../../../data";
 import type { LocalDay } from "../../../data/localDay";
-import { projectGoalDate } from "./listening";
+import { formatHoursMinutes, LISTENING_GOAL_HOURS, projectGoalDate } from "./listening";
 export { LISTENING_GOAL_HOURS } from "./listening";
 
 // A non-breaking space keeps "12 / 25 dk" and "17 Kasım 2026" on one line.
@@ -33,6 +33,11 @@ const MONTHS = [
 /** The right side of the screen title: "12 / 25 dk". */
 export function formatDoneOfPlan(done: number, plan: number): string {
   return `${done}${NBSP}/${NBSP}${plan}${NBSP}dk`;
+}
+
+/** Lifetime listening against the shared goal, for the skill hero. */
+export function listeningSubtitle(totalMinutes: number): string {
+  return `Toplam ${formatHoursMinutes(totalMinutes)} / ${LISTENING_GOAL_HOURS} sa`;
 }
 
 /**
