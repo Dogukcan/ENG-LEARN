@@ -269,9 +269,10 @@ describe("applyRemote", () => {
     if (!localCard) throw new Error("no card");
     const remoteCard = { ...localCard, id: "c-remote", updatedAt: "2099-01-01T00:00:00.000Z" };
     const result = await repo.sync.applyRemote("cards", [remoteCard]);
-    expect(result).toMatchObject({ applied: 1, conflicts: 1 });
+    expect(result).toMatchObject({ applied: 0, skipped: 1, conflicts: 1 });
     const cards = await repo.sync.listChangedSince("cards", EPOCH);
-    expect(cards.map((c) => c.id)).toEqual(["c-remote"]);
+    expect(cards.map((c) => c.id)).toEqual([localCard.id]);
+    expect(cards[0]!.updatedAt > remoteCard.updatedAt).toBe(true);
     expect(cards[0]?.wordId).toBe(word.id);
     // A remote tombstone for the same word under another id does not replace a live card.
     const tomb = await repo.sync.applyRemote("cards", [

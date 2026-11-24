@@ -378,8 +378,14 @@ export interface Repository {
      * the local one only when it is strictly newer. Remote `updatedAt` values are kept as they
      * are (they are not bumped), so applying remote rows never creates a "local change" to push
      * back. Unique keys (word, video, card per word) are respected: see `ApplyRemoteResult`.
+     * Same-id cards with higher remote reps also win over time, except pending local edits.
+     * For pulled cards/logs, isPending runs on the current local row inside the write transaction.
      */
-    applyRemote(store: SyncStore, rows: unknown[]): Promise<ApplyRemoteResult>;
+    applyRemote(store: SyncStore, rows: unknown[], isPending?: (localRow: SyncRow) => boolean): Promise<ApplyRemoteResult>;
+    /** Atomically adopt a server card identity without losing edits made during the request. */
+    applyCardMerge(sentLocal: { id: string; updatedAt: string }, canonical: SyncRow): Promise<void>;
+    /** Apply a bundle reply atomically, retaining versions edited while its request was in flight. */
+    applyCardBundle?(sent: { cards: SyncRow[]; reviewLogs: SyncRow[] }, card: SyncRow | null, logs: SyncRow[]): Promise<void>;
     /**
      * Delete EVERY local record (all stores, tombstones included) and put the two fixed seed
      * books back. For "another account signed in on this device" and "delete this device's

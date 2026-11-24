@@ -399,9 +399,9 @@ function cleanAlternatives(list: string[] | undefined): string[] | undefined {
  * millisecond, or a clock that went back), it is one millisecond after `previous`, so the new
  * write is always strictly newer and sync can never mistake it for the old one.
  */
-function stampFrom(now: Date, previous?: string): string {
+function stampFrom(now: Date, ...previous: Array<string | undefined>): string {
   const time = now.getTime();
-  const before = previous ? Date.parse(previous) : Number.NaN;
+  const before = Math.max(...previous.filter((at): at is string => at !== undefined).map(Date.parse));
   return new Date(Number.isFinite(before) && before >= time ? before + 1 : time).toISOString();
 }
 
@@ -1034,18 +1034,23 @@ export function createIndexedDbRepository(
 
       async undoLastReview(): Promise<UndoResult> {
         return inTransaction(["cards", "reviewLogs"], async (tx): Promise<UndoResult> => {
-          // Walk the time index backwards: the first live entry is the newest review. Logs that
-          // were already undone are only marked deleted, so they are skipped here.
-          let cursor = await tx.objectStore("reviewLogs").index("by-reviewedAt").openCursor(null, "prev");
+          // The newest live log identifies the card; choose the review that card counts,
+          // even when a later wall-clock branch log exists for the same card.
+          const logs = tx.objectStore("reviewLogs");
+          let cursor = await logs.index("by-reviewedAt").openCursor(null, "prev");
           while (cursor && !isLive(cursor.value)) cursor = await cursor.continue();
           if (!cursor) return { ok: false, reason: "nothing-to-undo" };
-
-          const log = cursor.value;
           const cards = tx.objectStore("cards");
-          const current = await cards.get(log.cardId);
+          const current = await cards.get(cursor.value.cardId);
+          if (!isLive(current)) return { ok: false, reason: "nothing-to-undo" };
+          const log = (await logs.index("by-cardId").getAll(current.id)).find((candidate) =>
+            isLive(candidate) && Date.parse(candidate.reviewedAt) === Date.parse(current.lastReviewAt ?? ""));
+          if (!log) return { ok: false, reason: "nothing-to-undo" };
           // Twin adoption can move this log without changing its historical snapshot. Restoring
           // that snapshot would revive a losing card or put it back on the losing word.
-          if (!isLive(current) || current.wordId !== log.previousCard.wordId || current.id !== log.previousCard.id) {
+          if (!isLive(current) || current.wordId !== log.previousCard.wordId || current.id !== log.previousCard.id ||
+            current.reps !== log.previousCard.reps + 1 ||
+            Date.parse(current.lastReviewAt ?? "") !== Date.parse(log.reviewedAt)) {
             return { ok: false, reason: "nothing-to-undo" };
           }
           // The snapshot restores everything, including lapses and the leech flag. Its updatedAt
@@ -1056,7 +1061,7 @@ export function createIndexedDbRepository(
           };
           delete restored.deletedAt;
           await cards.put(restored);
-          await cursor.update(tombstone(log, new Date()));
+          await logs.put(tombstone(log, new Date()));
           return { ok: true, card: restored };
         });
       },
@@ -1385,7 +1390,49 @@ export function createIndexedDbRepository(
         return rows.map((row) => toSyncRow(store, row));
       },
 
-      async applyRemote(store: SyncStore, rows: unknown[]): Promise<ApplyRemoteResult> {
+      async applyCardBundle(sent, card, logs) {
+        const cards = card ? [parseRemoteRow("cards", { ...card, lastReviewAt: card.lastReviewAt ?? null })] : [];
+        const reviewLogs = logs.map((log) => parseRemoteRow("reviewLogs", log));
+        if ([...cards, ...reviewLogs].some((row) => !row)) throw new Error("Invalid card bundle");
+        await inTransaction(["cards", "reviewLogs"], async (tx) => {
+          for (const store of ["cards", "reviewLogs"] as const) {
+            const os = tx.objectStore(store) as unknown as LooseStore;
+            for (const row of (store === "cards" ? cards : reviewLogs)) {
+              if (!row) continue;
+              const local = await os.get(row.id as string);
+              const version = sent[store].find((r) => r.id === row.id);
+              // A logs-only group must not overwrite an unsubmitted local card.
+              if (local && (!version || local.updatedAt !== version.updatedAt)) continue;
+              await os.put(row);
+            }
+          }
+        });
+      },
+
+      async applyCardMerge(sentLocal, canonical) {
+        const parsed = parseRemoteRow("cards", canonical);
+        if (!parsed) throw new Error("Invalid canonical card");
+        const serverCard = parsed as unknown as Card;
+        await inTransaction(["cards", "reviewLogs"], async (tx) => {
+          const cards = tx.objectStore("cards");
+          const local = await cards.get(sentLocal.id);
+          if (sentLocal.id === serverCard.id) {
+            await cards.put(serverCard);
+            return;
+          }
+          // Free by-wordId even when the losing record is a tombstone.
+          await cards.delete(sentLocal.id);
+          const next = !serverCard.deletedAt && local && local.updatedAt !== sentLocal.updatedAt
+            ? { ...local, id: serverCard.id, wordId: serverCard.wordId,
+                updatedAt: stampFrom(new Date(), local.updatedAt, serverCard.updatedAt) }
+            : serverCard;
+          await cards.put(next);
+          await moveCardReviewLogs(tx.objectStore("reviewLogs") as unknown as LooseStore,
+            sentLocal.id, serverCard.id, new Date());
+        });
+      },
+
+      async applyRemote(store: SyncStore, rows: unknown[], isPending?: (localRow: SyncRow) => boolean): Promise<ApplyRemoteResult> {
         const result: ApplyRemoteResult = { applied: 0, skipped: 0, conflicts: 0, invalid: 0 };
         const incoming: Loose[] = [];
         for (const row of rows) {
@@ -1411,8 +1458,19 @@ export function createIndexedDbRepository(
           for (const row of incoming) {
             const key = store === "settings" ? SETTINGS_KEY : (row.id as string);
             const local = await os.get(key);
+            // Pull cannot decide a pending review/undo. Its bundle reply is authoritative.
+            // Different-id card twins still follow the existing resolution rules below.
+            if ((store === "cards" || store === "reviewLogs") && local && isPending?.(toSyncRow(store, local))) {
+              result.skipped += 1;
+              continue;
+            }
             // Last write wins. Equal times keep the local copy: it is already the same change.
-            if (local && (local.updatedAt as string) >= (row.updatedAt as string)) {
+            const higherReps = store === "cards" && local &&
+              (row.reps as number) > (local.reps as number);
+            // A settled log's server version may reject a tombstone whose client clock
+            // is ahead. Accept that authoritative response while preserving pending edits.
+            const settledLog = store === "reviewLogs" && isPending !== undefined;
+            if (local && !higherReps && !settledLog && (local.updatedAt as string) >= (row.updatedAt as string)) {
               result.skipped += 1;
               continue;
             }
@@ -1456,6 +1514,12 @@ export function createIndexedDbRepository(
               const other = await os.index("by-wordId").get(row.wordId as string);
               if (other && other.id !== row.id) {
                 result.conflicts += 1;
+                if (!deleted && isLive(other as { deletedAt?: string })) {
+                  // Preserve both branch candidates until the server can choose under its lock.
+                  await os.put({ ...other, updatedAt: stampFrom(now, other.updatedAt as string, row.updatedAt as string) });
+                  result.skipped += 1;
+                  continue;
+                }
                 const otherWins = isLive(other as { deletedAt?: string }) && (other.updatedAt as string) >= (row.updatedAt as string);
                 if (deleted || otherWins) {
                   result.skipped += 1;
@@ -1539,9 +1603,17 @@ export function createIndexedDbRepository(
     stats: base.stats,
     sync: {
       ...base.sync,
+      async applyCardBundle(sent, card, logs) {
+        await base.sync.applyCardBundle!(sent, card, logs);
+        notify();
+      },
+      async applyCardMerge(sentLocal, canonical) {
+        await base.sync.applyCardMerge(sentLocal, canonical);
+        notify();
+      },
       // Remote rows change what screens show, so they hear about it, but only if a row was written.
-      async applyRemote(store, rows) {
-        const result = await base.sync.applyRemote(store, rows);
+      async applyRemote(store, rows, isPending) {
+        const result = await base.sync.applyRemote(store, rows, isPending);
         if (result.applied > 0) notify();
         return result;
       },
