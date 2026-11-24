@@ -64,7 +64,7 @@ export function ReportStep({ scenarioId }: ReportStepProps) {
 
   return (
     <>
-      <Panel as="section" padding="sm" aria-labelledby="konusma-report-heading" className="flex flex-col gap-3">
+      <Panel tactile as="section" padding="sm" aria-labelledby="konusma-report-heading" className="flex flex-col gap-3">
         <h2 id="konusma-report-heading" className="text-section leading-[1.25] font-semibold text-text">
           Raporu yapıştır
         </h2>
@@ -79,7 +79,7 @@ export function ReportStep({ scenarioId }: ReportStepProps) {
           // No text-small here: below 16px iOS Safari zooms the page when the field is focused.
           className="font-mono"
         />
-        <Button variant="neutral" disabled={disabled} onClick={onProcess}>
+        <Button tactile variant="neutral" disabled={disabled} onClick={onProcess}>
           {alreadySaved ? "İşlendi" : "İşle"}
         </Button>
         <div role="alert" className="empty:hidden">
@@ -102,7 +102,7 @@ function Results({ processed }: { processed: Processed }) {
   const { report, saved } = processed;
   return (
     <>
-      <Panel as="section" padding="sm" aria-labelledby="konusma-res-errors" className="flex flex-col gap-3">
+      <Panel tactile as="section" padding="sm" aria-labelledby="konusma-res-errors" className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">
           <h2 id="konusma-res-errors" className="text-section leading-[1.25] font-semibold text-text">
             Hatalar
@@ -126,7 +126,7 @@ function Results({ processed }: { processed: Processed }) {
       </Panel>
 
       {report.betterPhrases.length > 0 ? (
-        <Panel as="section" padding="sm" aria-labelledby="konusma-res-phrases" className="flex flex-col gap-3">
+        <Panel tactile as="section" padding="sm" aria-labelledby="konusma-res-phrases" className="flex flex-col gap-3">
           <h2 id="konusma-res-phrases" className="text-section leading-[1.25] font-semibold text-text">
             Daha iyi ifadeler
           </h2>
@@ -141,7 +141,7 @@ function Results({ processed }: { processed: Processed }) {
         </Panel>
       ) : null}
 
-      <Panel as="section" padding="sm" aria-labelledby="konusma-res-words" className="flex flex-col gap-2">
+      <Panel tactile as="section" padding="sm" aria-labelledby="konusma-res-words" className="flex flex-col gap-2">
         <h2 id="konusma-res-words" className="text-section leading-[1.25] font-semibold text-text">
           Yeni kelimeler
         </h2>

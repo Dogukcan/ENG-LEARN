@@ -26,7 +26,7 @@ export function TimerStep() {
   else if (other) help = `${other} sayacı çalışıyor. Başlatırsan o durur ve süresi kaydedilir.`;
 
   return (
-    <Panel as="section" padding="md" aria-labelledby="konusma-timer-heading" className="flex flex-col gap-4">
+    <Panel tactile as="section" padding="md" aria-labelledby="konusma-timer-heading" className="flex min-w-0 flex-col gap-4">
       <h2 id="konusma-timer-heading" className="text-section leading-[1.25] font-semibold text-text">
         Konuşma süresi
       </h2>
@@ -39,7 +39,7 @@ export function TimerStep() {
         {formatClock(isRunning ? elapsedSeconds : 0)}
       </p>
       <p className="text-small leading-[1.35] text-muted">{help}</p>
-      <Button variant="primary-block" block="konusma" aria-pressed={isRunning} onClick={onToggle}>
+      <Button tactile variant="primary-block" block="konusma" aria-pressed={isRunning} onClick={onToggle}>
         {isRunning ? "Durdur" : "Konuşmaya başla"}
       </Button>
       <p role="alert" className="text-small font-medium text-negative empty:hidden">

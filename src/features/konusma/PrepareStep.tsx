@@ -47,24 +47,21 @@ export function PrepareStep({ scenario, onScenarioChange, targetWords }: Prepare
 
   return (
     <>
-      <section aria-labelledby="konusma-scenario-heading" className="flex flex-col gap-2">
+      <Panel tactile as="section" padding="sm" aria-labelledby="konusma-scenario-heading" className="flex min-w-0 flex-col gap-3">
         <h2 id="konusma-scenario-heading" className="text-section leading-[1.25] font-semibold text-text">
           Senaryo
         </h2>
-        <div role="group" aria-label="Senaryo seçimi" className="grid grid-cols-2 gap-2">
+        <div role="group" aria-label="Senaryo seçimi" className="flex min-w-0 flex-col gap-3">
           {SCENARIOS.map((item) => {
             const selected = item.id === scenario.id;
             return (
-              <button
+              <Button
+                tactile
                 key={item.id}
                 type="button"
                 aria-pressed={selected}
                 onClick={() => onScenarioChange(item.id)}
-                className={cx(
-                  "flex min-h-[104px] flex-col justify-between gap-2 rounded-[14px] border-2 p-3 text-left",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text",
-                  selected ? "border-text bg-konusma-tile text-konusma-ink" : "border-transparent bg-surface text-text",
-                )}
+                className="h-auto min-h-14 min-w-0 flex-col items-stretch gap-2 p-3 text-left aria-pressed:border-konusma-mark aria-pressed:bg-konusma-tile aria-pressed:text-konusma-ink aria-[pressed=false]:bg-raised"
               >
                 <span className="text-body leading-[1.25] font-semibold">{item.title}</span>
                 <span className="flex items-baseline justify-between gap-2">
@@ -73,22 +70,22 @@ export function PrepareStep({ scenario, onScenarioChange, targetWords }: Prepare
                   </span>
                   {selected ? <span className="text-small font-bold whitespace-nowrap">Seçili</span> : null}
                 </span>
-              </button>
+              </Button>
             );
           })}
         </div>
-        <Panel padding="sm" className="flex flex-col gap-2">
-          <h3 className="text-small font-semibold text-muted">3 görev (İngilizce, promptta aynen geçer)</h3>
-          <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-body leading-[1.4] text-text">
-            {scenario.tasks.map((task) => (
-              <li key={task}>{task}</li>
-            ))}
-          </ol>
-          <p className="text-small leading-[1.35] text-muted">Bitiş: {scenario.endCondition}</p>
-        </Panel>
-      </section>
+      </Panel>
+      <Panel tactile as="section" padding="sm" aria-labelledby="konusma-tasks-heading" className="flex min-w-0 flex-col gap-2">
+        <h2 id="konusma-tasks-heading" className="text-small font-semibold text-muted">3 görev (İngilizce, promptta aynen geçer)</h2>
+        <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-body leading-[1.4] text-text">
+          {scenario.tasks.map((task) => (
+            <li key={task}>{task}</li>
+          ))}
+        </ol>
+        <p className="text-small leading-[1.35] text-muted">Bitiş: {scenario.endCondition}</p>
+      </Panel>
 
-      <Panel as="section" padding="sm" aria-labelledby="konusma-prompt-heading" className="flex flex-col gap-3">
+      <Panel tactile as="section" padding="sm" aria-labelledby="konusma-prompt-heading" className="flex min-w-0 flex-col gap-3">
         <h2 id="konusma-prompt-heading" className="text-section leading-[1.25] font-semibold text-text">
           Prompt
         </h2>
@@ -99,6 +96,7 @@ export function PrepareStep({ scenario, onScenarioChange, targetWords }: Prepare
           <p className="text-small leading-[1.35] text-text">Bugünün hedef kelimeleri: {targetWords.join(", ")}.</p>
         ) : null}
         <Button
+          tactile
           variant="neutral"
           onClick={onCopy}
           className={copied ? "border-konusma-mark bg-konusma-tile text-konusma-ink" : undefined}
@@ -107,7 +105,8 @@ export function PrepareStep({ scenario, onScenarioChange, targetWords }: Prepare
         </Button>
         <LiveRegion visible>{status}</LiveRegion>
         <Button
-          variant="text"
+          tactile
+          variant="neutral"
           aria-expanded={previewOpen}
           aria-controls="konusma-prompt-preview"
           onClick={() => setPreviewOpen((open) => !open)}

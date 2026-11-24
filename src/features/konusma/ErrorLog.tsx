@@ -6,7 +6,7 @@ export function ErrorLog({ counts }: { counts: Readonly<Record<string, number>> 
   const total = totalErrors(counts);
   const rows = errorBarRows(counts);
   return (
-    <Panel as="section" padding="sm" aria-labelledby="konusma-log-heading" className="flex flex-col gap-3">
+    <Panel tactile as="section" padding="sm" aria-labelledby="konusma-log-heading" className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="konusma-log-heading" className="text-section leading-[1.25] font-semibold text-text">
           Hata kaydı, bu hafta
