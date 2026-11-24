@@ -1,0 +1,39 @@
+/* Reserve room for the first node's action above the proportional stage. */
+.skill-path { padding-top: calc(var(--gap) * 3); }
+.skill-path-stage { position: relative; container-type: inline-size; width: 100%; max-width: 358px; aspect-ratio: 358 / 548; margin-inline: auto; }
+.skill-path-ribbon { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.skill-path-ribbon path { fill: none; stroke-linecap: round; }
+.skill-path-ribbon-edge { stroke: var(--border); stroke-width: 38; }
+.skill-path-ribbon-pale { stroke: var(--surface); stroke-width: 30; }
+.skill-path-ribbon-covered { stroke-width: 22; }
+.skill-path-node { width: var(--node-size); height: var(--node-size); position: absolute; transform: translate(-50%, -50%); z-index: 1; }
+.skill-path-node.is-next { z-index: 2; }
+.skill-path-ring { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; border-radius: 50%; }
+.skill-path-ring-face { position: absolute; inset: 0; border-radius: 50%; background: var(--surface); box-shadow: 0 calc(7 / 358 * 100cqw) 0 var(--border), 0 calc(12 / 358 * 100cqw) calc(22 / 358 * 100cqw) color-mix(in srgb, var(--text) 8%, transparent); }
+.is-next .skill-path-ring-face { box-shadow: 0 calc(7 / 358 * 100cqw) 0 var(--skill-mark), 0 calc(12 / 358 * 100cqw) calc(24 / 358 * 100cqw) color-mix(in srgb, var(--skill-mark) 18%, transparent); }
+.skill-path-ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.skill-path-ring-svg circle { fill: none; stroke-width: calc(8 / 358 * 100cqw); }
+.skill-path-track { stroke: color-mix(in srgb, var(--track-empty) 30%, var(--surface)); }
+.skill-path-progress { stroke: var(--skill-mark); stroke-linecap: round; }
+.skill-path-disc { position: relative; display: flex; align-items: center; justify-content: center; width: calc(70 / 358 * 100cqw); height: calc(70 / 358 * 100cqw); border-radius: 50%; border: calc(2 / 358 * 100cqw) solid var(--skill-mark); background: var(--skill-tile); color: var(--skill-ink); box-shadow: 0 calc(6 / 358 * 100cqw) 0 var(--skill-mark); transform: translateY(calc(-3 / 358 * 100cqw)); transition: transform 90ms ease, box-shadow 90ms ease; }
+.is-next .skill-path-disc { width: calc(80 / 358 * 100cqw); height: calc(80 / 358 * 100cqw); }
+.skill-path-ring:active .skill-path-disc { transform: translateY(calc(3 / 358 * 100cqw)); box-shadow: 0 0 0 var(--skill-mark); }
+.skill-path-disc svg { width: calc(31 / 358 * 100cqw); height: calc(31 / 358 * 100cqw); }
+.is-next .skill-path-disc svg { width: calc(35 / 358 * 100cqw); height: calc(35 / 358 * 100cqw); }
+.skill-path-check { position: absolute; bottom: calc(2 / 358 * 100cqw); right: calc(2 / 358 * 100cqw); display: flex; align-items: center; justify-content: center; width: calc(28 / 358 * 100cqw); height: calc(28 / 358 * 100cqw); border-radius: 50%; border: calc(3 / 358 * 100cqw) solid var(--surface); background: var(--positive); color: var(--ground); }
+.skill-path-check svg { width: calc(15 / 358 * 100cqw); height: calc(15 / 358 * 100cqw); fill: none; stroke: currentColor; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
+.skill-path-label { position: absolute; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; justify-content: center; width: max-content; min-height: 44px; padding: calc(var(--gap) / 4) calc(var(--gap) / 3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--text); box-shadow: 0 2px 0 var(--border); font-size: var(--fs-small); overflow-wrap: break-word; cursor: pointer; }
+.skill-path-node[data-side="right"] .skill-path-label { left: calc(100% + 8 / 358 * 100cqw); max-width: calc(100cqw - var(--anchor-x) - var(--node-size) / 2 - 12 / 358 * 100cqw); }
+.skill-path-node[data-side="left"] .skill-path-label { right: calc(100% + 8 / 358 * 100cqw); max-width: calc(var(--anchor-x) - var(--node-size) / 2 - 12 / 358 * 100cqw); text-align: right; }
+.skill-path-bubble { position: absolute; bottom: calc(100% - 8px); left: 50%; translate: clamp(calc(4px - var(--anchor-x)), -50%, calc(100cqw - 4px - var(--anchor-x) - 100%)) 0; min-height: 44px; width: max-content; max-width: calc(100cqw - 8px); padding: calc(var(--gap) / 4) calc(var(--gap) / 2); border-radius: var(--radius-control); background: var(--skill-button); color: var(--skill-button-text); box-shadow: 0 4px 0 var(--skill-button-edge); font-size: var(--fs-small); font-weight: 700; }
+/* Translate percentages use the bubble width: centre it, clamped to a 4px stage inset. */
+.skill-path-bubble { z-index: 1; }
+.skill-path-bubble::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border: 6px solid transparent; border-top-color: var(--skill-button); }
+.skill-path-bubble.can-pulse { animation: skill-path-pulse 3s ease-in-out infinite; }
+.skill-path-bubble:active { transform: translateY(4px); box-shadow: 0 0 0 var(--skill-button-edge); animation: none; }
+.skill-path-ring:focus-visible, .skill-path-bubble:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+@keyframes skill-path-pulse { 50% { transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) {
+  .skill-path-bubble.can-pulse { animation: none; }
+  .skill-path-disc { transition: none; }
+}
