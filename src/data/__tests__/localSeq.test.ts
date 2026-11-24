@@ -124,6 +124,20 @@ describe("local change sequences", () => {
     expect((await repo.sync.listChangedAfterSeq("books", 2)).map((r) => r.id)).toEqual([later.id]);
   });
 
+  it("creates a stable missing instance id atomically across repository handles", async () => {
+    const name = freshName();
+    const a = createIndexedDbRepository(name), b = createIndexedDbRepository(name);
+    const original = await a.sync.instanceId();
+    expect(await b.sync.instanceId()).toBe(original);
+    const raw = await openDB(name);
+    await raw.delete("syncMeta", "instance");
+    const [first, second] = await Promise.all([a.sync.instanceId(), b.sync.instanceId()]);
+    expect(first).not.toBe(original);
+    expect(second).toBe(first);
+    expect(await raw.get("syncMeta", "instance")).toEqual({ instanceId: first });
+    raw.close();
+  });
+
   it("records no upgrade boundaries for a fresh v6 database, even after local writes", async () => {
     const name = freshName();
     const repo = createIndexedDbRepository(name);
@@ -134,7 +148,8 @@ describe("local change sequences", () => {
     }
     expect(await createIndexedDbRepository(name).sync.upgradeMaxLocalSeq("books")).toBeNull();
     const raw = await openDB(name);
-    expect(await raw.count("syncMeta")).toBe(0);
+    expect((await raw.getAll("syncMeta")).filter((row) => row.upgradeMaxSeq !== undefined)).toEqual([]);
+    expect(await raw.get("syncMeta", "instance")).toEqual({ instanceId: await repo.sync.instanceId() });
     raw.close();
   });
 
@@ -165,6 +180,7 @@ describe("local change sequences", () => {
     }
     const upgraded = await openDB(name);
     expect(upgraded.version).toBe(6);
+    expect(await upgraded.get("syncMeta", "instance")).toEqual({ instanceId: await repo.sync.instanceId() });
     for (const store of SYNC_STORES) {
       expect(await upgraded.get("syncMeta", store)).toEqual({ upgradeMaxSeq: 3 });
       expect((await upgraded.getAll(store)).map((r) => r.payload).sort()).toEqual([`${store}-a`, `${store}-d`, `${store}-z`]);

@@ -21,6 +21,7 @@ function fakeRepo() {
       return () => listeners.delete(listener);
     },
     sync: {
+      instanceId: async () => "fake-database-instance",
       listChangedAfterSeq: async (store: SyncStore, seq: number) => {
         const list = rows.get(store) ?? [];
         let max = Math.max(0, ...list.map((r) => r.localSeq ?? 0));

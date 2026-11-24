@@ -5,6 +5,8 @@ import { SYNC_STORES } from "../../../data/repository";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TABLES, fromRemoteRow, toRemoteRow } from "../mapping";
 import type { Card } from "../../../data/types";
+import { createIndexedDbRepository } from "../../../data/indexeddb";
+import { createSyncEngine } from "../engine";
 import { LOCAL_TIME, USER_ID, createDevice, createSharedServer, createTwoDevices, syncRound } from "./twoDevices";
 
 const EPOCH = "1970-01-01T00:00:00.000Z";
@@ -1888,6 +1890,91 @@ describe("round 10 D1: device clock steps back after sync", () => {
   });
 });
 
+
+describe("round 10f database identity and card-twin sequences", () => {
+  it("resets surviving storage for a recreated database before counting and pushing two new words", async () => {
+    const { a, server } = createTwoDevices();
+    for (const word of ["old-one", "old-two", "old-three"]) await learn(a, word, 0);
+    await syncRound(a);
+    expect(a.storage.getItem("eng-learn.sync.pushSeq.words")).toBe("3");
+    const oldInstance = a.storage.getItem("eng-learn.sync.instance");
+    // A new database name simulates losing only IndexedDB while storage survives.
+    const repo = createIndexedDbRepository(`recreated-${crypto.randomUUID()}`);
+    let online = false;
+    const engine = createSyncEngine({ repo, client: server.client, storage: a.storage,
+      now: server.now, isOnline: () => online });
+    for (const word of ["new-one", "new-two"]) {
+      const added = await repo.inbox.add({ word, source: { kind: "diger" } });
+      if (!added.ok) throw new Error("add failed");
+      expect((await repo.words.triage(added.item.id, "known", server.now())).ok).toBe(true);
+    }
+    engine.setUser(USER_ID);
+    await engine.syncNow();
+    // Two words plus their two inbox tombstones are pending.
+    expect(engine.getState().pendingCount).toBe(4);
+    expect(await repo.sync.listChangedAfterSeq("words", Number(a.storage.getItem("eng-learn.sync.pushSeq.words")))).toHaveLength(2);
+    expect(a.storage.getItem("eng-learn.sync.instance")).not.toBe(oldInstance);
+    for (const store of SYNC_STORES) {
+      expect(a.storage.getItem(`eng-learn.sync.pushSeq.${store}`)).toBe("0");
+      expect(a.storage.getItem(`eng-learn.sync.pull.${store}`)).toBe("");
+      expect(a.storage.getItem(`eng-learn.sync.echo.${store}`)).toBe("{}");
+    }
+    online = true;
+    await engine.syncNow();
+    expect(engine.getState()).toMatchObject({ status: "idle", pendingCount: 0 });
+    expect([...server.tableOf("eng_words").values()].map((r) => r.lemma)).toEqual(expect.arrayContaining(["new-one", "new-two"]));
+    // Resetting pull cursors also recovers the old server words.
+    expect(await repo.sync.listChangedSince("words", EPOCH)).toHaveLength(5);
+  });
+
+  it("preserves all cursors and echoes on a normal restart of the same database", async () => {
+    const { a, server } = createTwoDevices();
+    await learn(a, "restart", 0);
+    await syncRound(a);
+    const keys = ["instance", ...SYNC_STORES.flatMap((s) => [`pushSeq.${s}`, `pull.${s}`, `echo.${s}`])];
+    const before = keys.map((key) => a.storage.getItem(`eng-learn.sync.${key}`));
+    const engine = createSyncEngine({ repo: createIndexedDbRepository(a.dbName), client: server.client,
+      storage: a.storage, now: server.now, isOnline: () => false });
+    engine.setUser(USER_ID);
+    await engine.syncNow();
+    expect(engine.getState().pendingCount).toBe(0);
+    expect(keys.map((key) => a.storage.getItem(`eng-learn.sync.${key}`))).toEqual(before);
+  });
+
+  it("pushes the next card after a pull hard-deletes the maximum-sequence card twin", async () => {
+    const { a, b, server } = createTwoDevices();
+    const { cardId, wordId } = await learn(a, "card-twin", 1);
+    await syncRound(a);
+    server.advance(10000);
+    const card = (await a.repo.sync.listChangedSince("cards", EPOCH)).find((r) => r.id === cardId)!;
+    const at = a.now().toISOString();
+    await localFixture(a, "cards", [{ ...card, updatedAt: at, deletedAt: at }]);
+    expect(await a.repo.sync.listChangedAfterSeq("cards", 2)).toMatchObject([{ localSeq: 3, deletedAt: at }]);
+    await syncRound(a);
+    const cursor = Number(a.storage.getItem("eng-learn.sync.pushSeq.cards"));
+    expect(cursor).toBe(3);
+    expect(server.tableOf("eng_cards").get(cardId)?.deleted_at).toBeTruthy();
+    await syncRound(b);
+    server.advance(10000);
+    const replacementId = crypto.randomUUID();
+    await localFixture(b, "cards", [{ ...card, id: replacementId, wordId,
+      updatedAt: b.now().toISOString(), deletedAt: null }]);
+    await syncRound(b);
+    await syncRound(a);
+    const raw = await openDB(a.dbName);
+    expect(await raw.get("cards", cardId)).toBeUndefined();
+    const replacement = await raw.get("cards", replacementId);
+    expect(replacement).toMatchObject({ wordId });
+    expect(replacement?.deletedAt).toBeUndefined();
+    raw.close();
+    const next = await learn(a, "after-card-twin", 0);
+    const nextCard = (await a.repo.sync.listChangedAfterSeq("cards", 0)).find((r) => r.id === next.cardId)!;
+    expect(nextCard.localSeq).toBeGreaterThan(cursor);
+    await syncRound(a);
+    expect(server.tableOf("eng_cards").get(next.cardId)).toMatchObject({ word_id: next.wordId, deleted_at: null });
+    expect(a.engine.getState().pendingCount).toBe(0);
+  });
+});
 
 describe("round 10b sequence cursors", () => {
   it("pushes alternating edits from two repositories sharing a database after clock steps back", async () => {

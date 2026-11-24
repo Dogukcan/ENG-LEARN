@@ -1,7 +1,7 @@
 // Tests for the v4 sync layer: the v3 -> v4 upgrade, soft deletes, listChangedSince, applyRemote.
 import "fake-indexeddb/auto";
 import { openDB } from "idb";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createIndexedDbRepository } from "../indexeddb";
 import type { Repository } from "../repository";
 
@@ -140,20 +140,28 @@ describe("soft deletes", () => {
 
 describe("listChangedSince", () => {
   it("returns rows strictly after the time, oldest first, including deleted rows", async () => {
-    const repo = createIndexedDbRepository(freshName());
-    const a = await repo.inbox.add({ word: "alpha", source: { kind: "diger" } });
-    const b = await repo.inbox.add({ word: "beta", source: { kind: "diger" } });
-    if (!a.ok || !b.ok) throw new Error("add failed");
-    const all = await repo.sync.listChangedSince("inbox", EPOCH);
-    expect(all.map((r) => r.id).sort()).toEqual([a.item.id, b.item.id].sort());
-    // Oldest first: the updatedAt values never go down.
-    expect(all.map((r) => r.updatedAt)).toEqual([...all.map((r) => r.updatedAt)].sort());
-    const latest = all[all.length - 1]?.updatedAt ?? "";
-    expect(await repo.sync.listChangedSince("inbox", latest)).toEqual([]);
-    await repo.inbox.remove(a.item.id);
-    const changed = await repo.sync.listChangedSince("inbox", latest);
-    expect(changed.map((r) => r.id)).toEqual([a.item.id]);
-    expect(changed[0]?.deletedAt).toEqual(expect.any(String));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(NOW);
+      const repo = createIndexedDbRepository(freshName());
+      const a = await repo.inbox.add({ word: "alpha", source: { kind: "diger" } });
+      vi.setSystemTime(NOW.getTime() + 1);
+      const b = await repo.inbox.add({ word: "beta", source: { kind: "diger" } });
+      if (!a.ok || !b.ok) throw new Error("add failed");
+      const all = await repo.sync.listChangedSince("inbox", EPOCH);
+      expect(all.map((r) => r.id).sort()).toEqual([a.item.id, b.item.id].sort());
+      // Oldest first: the updatedAt values never go down.
+      expect(all.map((r) => r.updatedAt)).toEqual([...all.map((r) => r.updatedAt)].sort());
+      const latest = all[all.length - 1]?.updatedAt ?? "";
+      expect(await repo.sync.listChangedSince("inbox", latest)).toEqual([]);
+      vi.setSystemTime(NOW.getTime() + 2);
+      await repo.inbox.remove(a.item.id);
+      const changed = await repo.sync.listChangedSince("inbox", latest);
+      expect(changed.map((r) => r.id)).toEqual([a.item.id]);
+      expect(changed[0]?.deletedAt).toEqual(expect.any(String));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("settings appear as one complete row with id app, only after the first update", async () => {
